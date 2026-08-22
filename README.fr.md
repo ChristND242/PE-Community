@@ -123,7 +123,7 @@ Consultez [CONTRIBUTING.md](CONTRIBUTING.md). Ce document et les politiques comm
 
 ## Signalement de Problèmes de Sécurité
 
-Une fois ce dépôt publié, les vulnérabilités devront être signalées au moyen du signalement privé de vulnérabilités de GitHub. N'ouvrez pas de ticket public. Consultez [SECURITY.md](SECURITY.md) pour connaître la politique de signalement.
+Les vulnérabilités devront être signalées au moyen du signalement privé de vulnérabilités de GitHub. N'ouvrez pas de ticket public. Consultez [SECURITY.md](SECURITY.md) pour connaître la politique de signalement.
 
 ## Licence
 
