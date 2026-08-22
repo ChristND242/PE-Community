@@ -16,7 +16,7 @@ packages/shared/.dist-staging-*/
 uploads/
 apps/api/uploads/
 tmp/
-logs/
+/logs/
 *.log
 *.dump
 *.backup
