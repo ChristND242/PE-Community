@@ -9,6 +9,12 @@ English | [Français](README.fr.md)
 
 PE Community is a self-hosted workspace for operating a private community. It brings member administration, events, announcements, task boards, automation, notifications, audit logs, and encrypted participant chat into one bilingual application.
 
+<img width="954" height="473" alt="pe-admin-dashboard-light" src="https://github.com/user-attachments/assets/5a79e70a-3aa6-4810-962f-34efd2e6af8f" />
+
+<img width="954" height="473" alt="pe-admin-dashboard-night" src="https://github.com/user-attachments/assets/665e8e8f-fb67-4539-9dfa-abc69269e934" />
+
+
+
 ## Overview
 
 The project provides separate owner, administrator, and member workspaces over a shared community platform. It is distributed as a source-built Docker Compose stack and includes a bilingual product and operator documentation site.
