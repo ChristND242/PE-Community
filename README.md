@@ -123,7 +123,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues must follow [SECURITY.md
 
 ## Security Reporting
 
-Once this repository is published, vulnerabilities should be reported through GitHub Private Vulnerability Reporting. Do not open a public issue. See [SECURITY.md](SECURITY.md) for the reporting policy.
+Vulnerabilities should be reported through GitHub Private Vulnerability Reporting. Do not open a public issue. See [SECURITY.md](SECURITY.md) for the reporting policy.
 
 ## License
 
