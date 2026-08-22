@@ -68,9 +68,9 @@ Open `WEB_ORIGIN` and complete the one-time setup flow. Do not run the developme
 
 ## Configuration
 
-The sanitized [`.env.example`](.env.example) lists the supported public deployment variables. Detailed bilingual operator guidance lives in `apps/site`; run `pnpm site:dev` to browse it locally.
+The [`.env.example`](.env.example) lists the supported public deployment variables.
 
-Treat JWT secrets, password peppers, encryption keys, database credentials, setup and recovery tokens, and SMTP credentials as production secrets. Never commit them.
+Treat JWT secrets, password peppers, encryption keys, database credentials, setup and recovery tokens, and SMTP credentials as production secrets.
 
 ## First-Run Setup
 
@@ -84,7 +84,7 @@ Encrypted chat protects message and attachment content from normal server-side r
 
 ## Documentation
 
-The full English and French product, administration, deployment, backup, security, and troubleshooting guides are maintained in `apps/site`. The repository READMEs remain concise entrypoints rather than duplicating that documentation.
+The full English and French product, administration, deployment, backup, security, and troubleshooting guides are maintained in `apps/site` or the official live documentations. 
 
 ## Development
 
