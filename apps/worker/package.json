@@ -18,10 +18,10 @@
     "@types/nodemailer": "^8.0.1",
     "bullmq": "^5.34.1",
     "ioredis": "^5.4.2",
-    "nodemailer": "^8.0.11"
+    "nodemailer": "^9.0.5"
   },
   "devDependencies": {
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.2"
   }
 }
