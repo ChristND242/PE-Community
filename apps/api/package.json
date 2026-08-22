@@ -1,0 +1,51 @@
+{
+  "name": "@pe/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "commonjs",
+  "scripts": {
+    "predev": "pnpm --filter @pe/shared prepare:dev",
+    "dev": "nest start --watch",
+    "build": "pnpm --filter @pe/shared build && nest build",
+    "start": "node dist/main.js",
+    "start:prod": "node dist/main.js",
+    "pretest": "pnpm --filter @pe/shared build",
+    "test": "tsx --test src/security/*.spec.ts src/email/*.spec.ts src/chat/*.spec.ts",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "^11.0.2",
+    "@nestjs/common": "^11.0.7",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.7",
+    "@nestjs/jwt": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.7",
+    "@nestjs/platform-socket.io": "^11.1.27",
+    "@nestjs/websockets": "^11.1.27",
+    "@pe/shared": "workspace:*",
+    "@prisma/client": "^6.1.0",
+    "argon2": "^0.45.0",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.34.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "cookie-parser": "^1.4.7",
+    "ioredis": "^5.4.2",
+    "otplib": "^13.4.1",
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.0",
+    "@types/qrcode": "^1.5.6",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.2"
+  }
+}

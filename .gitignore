@@ -1,0 +1,76 @@
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# Generated output
+dist/
+.next/
+.turbo/
+.cache/
+coverage/
+*.tsbuildinfo
+packages/shared/.dist-build.lock/
+packages/shared/.dist-staging-*/
+
+# Runtime data
+uploads/
+apps/api/uploads/
+tmp/
+logs/
+*.log
+*.dump
+*.backup
+*.bak
+*.sqlite
+*.sqlite3
+*.db
+backups/
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+.envrc
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+certs/
+
+# Private development documents excluded from the public tree
+PROJECT_SPEC.md
+account-email-change-security.md
+api-build-output-audit.md
+email-template-standard.md
+instruction.md
+platform.md
+profile-social-links.md
+project-learn.md
+public-site-mode-retirement.md
+public-site-parity.md
+report.md
+run.md
+self-hosted-distribution-foundation.md
+session-inactivity-security.md
+shared-development-build-race.md
+shared-package-cross-runtime-regression.md
+user-guide.md
+user-guide-fr.md
+docs/API.md
+docs/ARCHITECTURE.md
+docs/DEPLOYMENT.md
+docs/LOCAL_UPLOADS.md
+docs/SECURITY.md
+*-audit.md
+*-retirement.md
+*-parity.md
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

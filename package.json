@@ -1,0 +1,35 @@
+{
+  "name": "pe-community-management",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0",
+  "packageManager": "pnpm@11.5.2",
+  "scripts": {
+    "dev": "turbo dev --filter=@pe/api --filter=@pe/web --filter=@pe/worker --filter=@pe/shared",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\"",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "pnpm --filter @pe/shared build && node --env-file=.env --import tsx prisma/seed.ts",
+    "db:seed:demo": "pnpm --filter @pe/shared build && node --env-file=.env --import tsx prisma/seed.ts",
+    "api:dev": "pnpm --filter @pe/api dev",
+    "web:dev": "pnpm --filter @pe/web dev",
+    "worker:dev": "pnpm --filter @pe/worker dev",
+    "site:dev": "pnpm --filter @pe/site dev",
+    "release:check": "node scripts/check-public-tree.mjs",
+    "owner:disable-2fa": "node --env-file=.env --import tsx apps/api/src/owner-disable-2fa-cli.ts"
+  },
+  "devDependencies": {
+    "@pe/shared": "workspace:*",
+    "@prisma/client": "^6.1.0",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}

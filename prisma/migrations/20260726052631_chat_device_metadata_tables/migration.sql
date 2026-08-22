@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "ChatAttachment_communityId_lifecycleStatus_encryptedSize_create" RENAME TO "ChatAttachment_communityId_lifecycleStatus_encryptedSize_cr_idx";

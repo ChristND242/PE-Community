@@ -1,0 +1,27 @@
+{
+  "name": "@pe/worker",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "module",
+  "scripts": {
+    "predev": "pnpm --filter @pe/shared prepare:dev",
+    "dev": "tsx watch src/main.ts",
+    "build": "pnpm --filter @pe/shared build && tsc -p tsconfig.json",
+    "test": "pnpm --filter @pe/shared build && tsx --test src/*.spec.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@pe/shared": "workspace:*",
+    "@prisma/client": "^6.1.0",
+    "@types/nodemailer": "^8.0.1",
+    "bullmq": "^5.34.1",
+    "ioredis": "^5.4.2",
+    "nodemailer": "^8.0.11"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

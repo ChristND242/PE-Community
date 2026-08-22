@@ -1,0 +1,1543 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipStatus {
+  ACTIVE
+  PENDING
+  SUSPENDED
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum RsvpStatus {
+  GOING
+  MAYBE
+  DECLINED
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AnnouncementAuthorMode {
+  USER
+  COMMUNITY_TEAM
+}
+
+enum FeedCommentAuthorMode {
+  USER
+  COMMUNITY_TEAM
+}
+
+enum EventTaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum EventTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskBoardAutomationRuleType {
+  DUE_BEFORE
+  OVERDUE
+  AUTO_COMPLETE_WHEN_CHECKLIST_DONE
+  FLAG_UNASSIGNED
+  STALE_TASK_FOLLOW_UP
+  CHECKLIST_INCOMPLETE_BEFORE_DUE
+  OVERDUE_ESCALATION
+}
+
+enum TaskBoardAutomationRuleChangeType {
+  CREATED
+  UPDATED
+  ROLLED_BACK
+}
+
+enum TaskBoardAutomationRunStatus {
+  SUCCESS
+  SKIPPED
+  FAILED
+}
+
+enum TaskBoardAutomationRunMode {
+  LIVE
+  DRY_RUN
+  TEST_NOTIFICATION
+}
+
+enum NotificationTemplateKey {
+  TASK_BOARD_AUTOMATION_DUE_BEFORE
+  TASK_BOARD_AUTOMATION_OVERDUE
+  TASK_BOARD_AUTOMATION_TEST
+  TASK_BOARD_AUTOMATION_AUTO_COMPLETE
+  TASK_BOARD_AUTOMATION_FLAG_UNASSIGNED
+  TASK_BOARD_AUTOMATION_STALE_TASK_FOLLOW_UP
+  TASK_BOARD_AUTOMATION_CHECKLIST_INCOMPLETE_BEFORE_DUE
+  TASK_BOARD_AUTOMATION_OVERDUE_ESCALATION
+}
+
+enum TaskBoardVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+enum TaskBoardStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum EventTaskActivityType {
+  CREATED
+  ASSIGNED
+  REASSIGNED
+  UNASSIGNED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  DUE_DATE_CHANGED
+  TITLE_CHANGED
+  DESCRIPTION_CHANGED
+  LABEL_CHANGED
+  COMMENT_ADDED
+  COMMENT_ARCHIVED
+  ARCHIVED
+  REORDERED
+  ATTACHMENT_ADDED
+  ATTACHMENT_ARCHIVED
+  CHECKLIST_ITEM_ADDED
+  CHECKLIST_ITEM_UPDATED
+  CHECKLIST_ITEM_COMPLETED
+  CHECKLIST_ITEM_REOPENED
+  CHECKLIST_ITEM_ARCHIVED
+  CHECKLIST_REORDERED
+}
+
+enum ChatConversationType {
+  DIRECT
+  GROUP
+}
+
+enum ChatDeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum ChatDeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+  UNKNOWN
+}
+
+enum ChatKeyStatus {
+  ACTIVE
+  RETIRED
+  REVOKED
+}
+
+enum ChatMediaCategory {
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  OTHER
+}
+
+enum ChatAttachmentLifecycle {
+  ACTIVE
+  PENDING_DELETION
+  DELETING
+  DELETED
+  DELETE_FAILED
+}
+
+enum ChatMediaDeletionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ProfileLinkPlatform {
+  WEBSITE
+  LINKEDIN
+  X
+  FACEBOOK
+  INSTAGRAM
+  YOUTUBE
+  TIKTOK
+  GITHUB
+  GITLAB
+  DISCORD
+  WHATSAPP
+  TELEGRAM
+  MASTODON
+  THREADS
+  BLUESKY
+  OTHER
+}
+
+enum ProfileLinkVisibility {
+  PUBLIC
+  MEMBERS
+  PRIVATE
+}
+
+model User {
+  id                   String       @id @default(cuid())
+  email                String       @unique
+  name                 String
+  passwordHash         String
+  forcePasswordChange  Boolean      @default(false)
+  passwordChangedAt    DateTime?
+  emailVerifiedAt      DateTime?
+  twoFactorEnabled     Boolean      @default(false)
+  twoFactorSecret      String?
+  twoFactorConfirmedAt DateTime?
+  twoFactorReenrollmentRequired Boolean @default(false)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  memberships          Membership[]
+  sessions             Session[]
+  rsvps                EventRsvp[]
+  assignedEventTasks   EventTask[] @relation("EventTaskAssignee")
+  eventTaskAssignments EventTaskAssignee[] @relation("EventTaskAssignedUser")
+  assignedTaskAssignments EventTaskAssignee[] @relation("EventTaskAssignedBy")
+  createdEventTasks    EventTask[] @relation("EventTaskCreator")
+  eventTaskActivities  EventTaskActivity[] @relation("EventTaskActivityActor")
+  eventTaskComments    EventTaskComment[] @relation("EventTaskCommentAuthor")
+  eventTaskAttachments EventTaskAttachment[] @relation("EventTaskAttachmentUploader")
+  createdEventTaskChecklistItems EventTaskChecklistItem[] @relation("EventTaskChecklistItemCreator")
+  completedEventTaskChecklistItems EventTaskChecklistItem[] @relation("EventTaskChecklistItemCompleter")
+  createdEventTaskTemplates EventTaskTemplate[] @relation("EventTaskTemplateCreator")
+  createdTaskBoards     TaskBoard[] @relation("TaskBoardCreator")
+  createdTaskBoardAutomationRules TaskBoardAutomationRule[] @relation("TaskBoardAutomationRuleCreator")
+  draftedTaskBoardAutomationRules TaskBoardAutomationRule[] @relation("TaskBoardAutomationRuleDraftUpdatedBy")
+  archivedTaskBoardAutomationRules TaskBoardAutomationRule[] @relation("TaskBoardAutomationRuleArchivedBy")
+  changedTaskBoardAutomationRuleVersions TaskBoardAutomationRuleVersion[] @relation("TaskBoardAutomationRuleVersionChangedBy")
+  createdTaskBoardAutomationPresets TaskBoardAutomationPreset[] @relation("TaskBoardAutomationPresetCreatedBy")
+  updatedTaskBoardAutomationPresets TaskBoardAutomationPreset[] @relation("TaskBoardAutomationPresetUpdatedBy")
+  updatedNotificationTemplates NotificationTemplate[] @relation("NotificationTemplateUpdatedBy")
+  twoFactorBackupCodes UserTwoFactorBackupCode[]
+  passwordResetTokens  PasswordResetToken[]
+  emailChangeRequests  EmailChangeRequest[]
+  emailCampaigns       EmailCampaign[]
+  feedLikes            FeedLike[]
+  feedComments         FeedComment[]
+  feedCommentLikes     FeedCommentLike[]
+  createdInviteLinks   CommunityInviteLink[]
+  createdChatConversations ChatConversation[] @relation("ChatConversationCreator")
+  chatParticipants     ChatConversationParticipant[]
+  sentChatMessages     ChatMessage[] @relation("ChatMessageSender")
+  deletedChatMessages  ChatMessage[] @relation("ChatMessageDeletedBy")
+  hiddenChatMessages   ChatMessageHidden[]
+  chatMessageReactions ChatMessageReaction[]
+  chatMessageStars     ChatMessageStar[]
+  chatMessageReportsMade ChatMessageReport[] @relation("ChatMessageReportReporter")
+  chatMessageReportsReceived ChatMessageReport[] @relation("ChatMessageReportReportedUser")
+  chatMessageReportsResolved ChatMessageReport[] @relation("ChatMessageReportResolvedBy")
+  blockedChatUsers     ChatUserBlock[] @relation("ChatUserBlockBlocker")
+  blockedByChatUsers   ChatUserBlock[] @relation("ChatUserBlockBlocked")
+  sentChatAttachments  ChatAttachment[] @relation("ChatAttachmentSender")
+  chatAttachmentViews  ChatAttachmentView[]
+  chatDevices          ChatDevice[] @relation("ChatDeviceUser")
+  revokedChatDevices   ChatDevice[] @relation("ChatDeviceRevokedBy")
+  chatDeviceKeys       ChatDeviceKey[]
+  requestedChatMediaDeletions ChatMediaDeletionOperation[] @relation("ChatMediaDeletionRequestedBy")
+  chatPresence         ChatPresence[]
+  loginStreaks         UserLoginStreak[]
+  loginStreakEvents    UserLoginStreakEvent[]
+}
+
+model Organization {
+  id          String      @id @default(cuid())
+  name        String
+  communities Community[]
+  createdAt   DateTime    @default(now())
+}
+
+model Community {
+  id             String                    @id @default(cuid())
+  name           String
+  slug           String                    @unique
+  organizationId String
+  organization   Organization              @relation(fields: [organizationId], references: [id])
+  memberships    Membership[]
+  applications   RegistrationApplication[]
+  events         Event[]
+  eventTasks     EventTask[]
+  eventTaskAssignees EventTaskAssignee[]
+  eventTaskActivities EventTaskActivity[]
+  eventTaskComments EventTaskComment[]
+  eventTaskAttachments EventTaskAttachment[]
+  eventTaskChecklistItems EventTaskChecklistItem[]
+  eventTaskTemplates EventTaskTemplate[]
+  taskBoards      TaskBoard[]
+  taskBoardAutomationRules TaskBoardAutomationRule[]
+  taskBoardAutomationRuleVersions TaskBoardAutomationRuleVersion[]
+  taskBoardAutomationRuns TaskBoardAutomationRun[]
+  taskBoardAutomationPresets TaskBoardAutomationPreset[]
+  announcements  Announcement[]
+  feedLikes      FeedLike[]
+  feedComments   FeedComment[]
+  feedCommentLikes FeedCommentLike[]
+  notifications  Notification[]
+  settings       CommunitySettings?
+  emailSettings  CommunityEmailSettings?
+  reminderSettings CommunityReminderSettings?
+  inviteLinks    CommunityInviteLink[]
+  emailCampaigns EmailCampaign[]
+  notificationTemplates NotificationTemplate[]
+  messageTemplates CommunityMessageTemplate[]
+  auditLogs      AuditLog[]
+  roles          Role[]
+  chatConversations ChatConversation[]
+  chatDevices       ChatDevice[]
+  chatDeviceKeys ChatDeviceKey[]
+  chatAttachments ChatAttachment[]
+  chatStorageUsage CommunityChatStorageUsage?
+  chatMediaDeletionOperations ChatMediaDeletionOperation[]
+  chatPresence   ChatPresence[]
+  chatMessageReports ChatMessageReport[]
+  loginStreaks   UserLoginStreak[]
+  loginStreakEvents UserLoginStreakEvent[]
+  createdAt      DateTime                  @default(now())
+}
+
+model CommunityMessageTemplate {
+  id              String    @id @default(cuid())
+  communityId     String
+  key             String
+  locale          String    @default("en")
+  channel         String
+  title           String
+  subject         String
+  previewText     String?
+  heading         String
+  greeting        String?
+  body            String
+  buttonLabel     String?
+  fallbackLinkInstructions String?
+  expirationNotice String?
+  securityNotice  String?
+  footerExplanation String?
+  defaultBody     String
+  defaultContent  Json?
+  variablesJson   Json
+  isEditable      Boolean   @default(true)
+  isSystem        Boolean   @default(false)
+  needsReview     Boolean   @default(false)
+  updatedByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  community       Community @relation(fields: [communityId], references: [id])
+
+  @@unique([communityId, key, locale])
+  @@index([communityId, key])
+}
+
+model NotificationTemplate {
+  id            String                  @id @default(cuid())
+  communityId   String
+  key           NotificationTemplateKey
+  name          String
+  description   String?
+  channelScope  Json
+  enabled       Boolean                 @default(true)
+  version       Int                     @default(1)
+  subjectEn     String?
+  subjectFr     String?
+  inAppTitleEn  String
+  inAppTitleFr  String
+  inAppBodyEn   String
+  inAppBodyFr   String
+  emailTitleEn  String?
+  emailTitleFr  String?
+  emailBodyEn   String?
+  emailBodyFr   String?
+  buttonLabelEn String?
+  buttonLabelFr String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  updatedById   String?
+  community     Community               @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  updatedBy     User?                   @relation("NotificationTemplateUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([communityId, key])
+  @@index([communityId, enabled])
+}
+
+model CommunitySettings {
+  id                        String    @id @default(cuid())
+  communityId               String    @unique
+  twoFactorEnabled          Boolean   @default(false)
+  defaultLanguage           String    @default("en")
+  timezone                  String    @default("UTC")
+  registrationApprovalMode  String    @default("portal_registration")
+  memberDirectoryVisibility String    @default("members_only")
+  supportContactEmail       String?
+  adminInAppAlertsEnabled   Boolean   @default(true)
+  emailDeliveryIssueAlertsEnabled Boolean @default(true)
+  registrationReviewAlertsEnabled Boolean @default(true)
+  registrationCaptchaEnabled Boolean @default(false)
+  registrationCaptchaMode String @default("DISABLED")
+  registrationCaptchaProvider String @default("DISABLED")
+  registrationCaptchaVariant String?
+  registrationCaptchaSiteKey String?
+  registrationCaptchaSecretEncrypted String?
+  registrationCaptchaHostname String?
+  registrationCaptchaAction String?
+  registrationCaptchaMinimumScore Float @default(0.5)
+  registrationIpLimit Int @default(3)
+  registrationIpWindowMinutes Int @default(15)
+  registrationNotificationCooldownHours Int @default(12)
+  registrationGlobalEmailDailyLimit Int @default(2)
+  passportExpirationAdminAlertsEnabled Boolean @default(true)
+  reminderRunSummaryAlertsEnabled Boolean @default(false)
+  maxActiveChatDevices      Int       @default(3)
+  chatMediaQuotaBytes       BigInt?
+  chatMediaWarningPercent   Int       @default(80)
+  chatAttachmentMaxBytes    Int       @default(10485760)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  community                 Community @relation(fields: [communityId], references: [id])
+}
+
+model UserLoginStreak {
+  id            String    @id @default(cuid())
+  communityId   String
+  userId        String
+  currentStreak Int       @default(0)
+  longestStreak Int       @default(0)
+  lastLoginDate DateTime?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([communityId, currentStreak])
+  @@index([communityId, longestStreak])
+  @@index([communityId, lastLoginAt])
+}
+
+model UserLoginStreakEvent {
+  id                    String    @id @default(cuid())
+  communityId           String
+  userId                String
+  type                  String
+  loginDate             DateTime
+  previousCurrentStreak Int       @default(0)
+  newCurrentStreak      Int       @default(0)
+  previousLongestStreak Int       @default(0)
+  newLongestStreak      Int       @default(0)
+  timezone              String
+  createdAt             DateTime  @default(now())
+  community             Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([communityId, createdAt])
+  @@index([communityId, userId])
+  @@index([communityId, type])
+  @@index([communityId, loginDate])
+}
+
+model CommunityEmailSettings {
+  id                    String    @id @default(cuid())
+  communityId           String    @unique
+  enabled               Boolean   @default(false)
+  smtpHost              String?
+  smtpPort              Int?
+  smtpUsername          String?
+  smtpPasswordEncrypted String?
+  smtpSecure            Boolean   @default(false)
+  fromEmail             String?
+  fromName              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  community             Community @relation(fields: [communityId], references: [id])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, expiresAt])
+}
+
+model EmailChangeRequest {
+  id                 String    @id @default(cuid())
+  userId             String
+  currentEmail       String
+  normalizedNewEmail String
+  tokenHash          String    @unique
+  expiresAt          DateTime
+  verifiedAt         DateTime?
+  cancelledAt        DateTime?
+  activeUserId       String?   @unique
+  activeNewEmail     String?   @unique
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([normalizedNewEmail])
+  @@index([expiresAt])
+}
+
+model UserTwoFactorBackupCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, usedAt])
+}
+
+model Membership {
+  id          String           @id @default(cuid())
+  userId      String
+  communityId String
+  roleId      String
+  status      MembershipStatus @default(ACTIVE)
+  joinedAt    DateTime         @default(now())
+  user        User             @relation(fields: [userId], references: [id])
+  community   Community        @relation(fields: [communityId], references: [id])
+  role        Role             @relation(fields: [roleId], references: [id])
+  profile     MemberProfile?
+  profileLinks MemberProfileLink[]
+
+  @@unique([userId, communityId])
+}
+
+model MemberProfileLink {
+  id            String                @id @default(cuid())
+  membershipId  String
+  platform      ProfileLinkPlatform
+  identifier    String?
+  label         String?
+  url           String?
+  normalizedUrl String?
+  legacyUrl     String?
+  visibility    ProfileLinkVisibility @default(PUBLIC)
+  position      Int                   @default(0)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  membership    Membership            @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, normalizedUrl])
+  @@index([membershipId, position])
+  @@index([membershipId, platform])
+}
+
+model MemberProfile {
+  id           String     @id @default(cuid())
+  membershipId String     @unique
+  title        String?
+  avatarUrl    String?
+  sex          String?
+  dicebearStyle String?
+  dicebearSeed  String?
+  bio          String?
+  birthdate    DateTime?
+  passportExpiresAt DateTime?
+  location     String?
+  interests    String[]   @default([])
+  skills       String[]   @default([])
+  socialLinks  Json?
+  membership   Membership @relation(fields: [membershipId], references: [id])
+}
+
+model ChatConversation {
+  id            String                    @id @default(cuid())
+  communityId   String
+  type          ChatConversationType      @default(DIRECT)
+  title         String?
+  avatarUrl     String?
+  createdById   String
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  lastMessageAt DateTime?
+  archivedAt    DateTime?
+  community     Community                 @relation(fields: [communityId], references: [id])
+  createdBy     User                      @relation("ChatConversationCreator", fields: [createdById], references: [id])
+  participants  ChatConversationParticipant[]
+  messages      ChatMessage[]
+  hiddenMessages ChatMessageHidden[]
+  attachments   ChatAttachment[]
+  attachmentViews ChatAttachmentView[]
+  messageReports ChatMessageReport[]
+
+  @@index([communityId, updatedAt])
+  @@index([createdById])
+}
+
+model ChatConversationParticipant {
+  id             String           @id @default(cuid())
+  conversationId String
+  userId         String
+  role           String           @default("MEMBER")
+  joinedAt       DateTime         @default(now())
+  lastReadAt     DateTime?
+  mutedAt        DateTime?
+  archivedAt     DateTime?
+  clearedAt      DateTime?
+  deletedAt      DateTime?
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id])
+  user           User             @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([userId, deletedAt])
+}
+
+model ChatMessage {
+  id                         String           @id @default(cuid())
+  conversationId             String
+  senderId                   String
+  encryptedPayload           String
+  encryptionNonce            String
+  encryptionAlgorithmVersion String
+  encryptionKeyVersion       String?
+  senderKeyVersionId         String?
+  recipientKeyVersionId      String?
+  createdAt                  DateTime         @default(now())
+  editedAt                   DateTime?
+  deliveredAt                DateTime?
+  deletedAt                  DateTime?
+  deletedForEveryoneAt       DateTime?
+  deletedById                String?
+  conversation               ChatConversation @relation(fields: [conversationId], references: [id])
+  sender                     User             @relation("ChatMessageSender", fields: [senderId], references: [id])
+  deletedBy                  User?            @relation("ChatMessageDeletedBy", fields: [deletedById], references: [id])
+  senderKeyVersion           ChatDeviceKey?   @relation("ChatMessageSenderKeyVersion", fields: [senderKeyVersionId], references: [id], onDelete: Restrict)
+  recipientKeyVersion        ChatDeviceKey?   @relation("ChatMessageRecipientKeyVersion", fields: [recipientKeyVersionId], references: [id], onDelete: Restrict)
+  hiddenForUsers             ChatMessageHidden[]
+  reactions                  ChatMessageReaction[]
+  stars                      ChatMessageStar[]
+  reports                    ChatMessageReport[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@index([deletedById])
+  @@index([editedAt])
+  @@index([senderKeyVersionId])
+  @@index([recipientKeyVersionId])
+}
+
+model ChatMessageReport {
+  id             String           @id @default(cuid())
+  messageId      String
+  conversationId String
+  communityId    String
+  reporterId     String
+  reportedUserId String?
+  reason         String
+  note           String?
+  status         String           @default("OPEN")
+  createdAt      DateTime         @default(now())
+  resolvedAt     DateTime?
+  resolvedById   String?
+  message        ChatMessage      @relation(fields: [messageId], references: [id])
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id])
+  community      Community        @relation(fields: [communityId], references: [id])
+  reporter       User             @relation("ChatMessageReportReporter", fields: [reporterId], references: [id])
+  reportedUser   User?            @relation("ChatMessageReportReportedUser", fields: [reportedUserId], references: [id])
+  resolvedBy     User?            @relation("ChatMessageReportResolvedBy", fields: [resolvedById], references: [id])
+
+  @@unique([messageId, reporterId])
+  @@index([conversationId, createdAt])
+  @@index([communityId, status, createdAt])
+  @@index([reportedUserId])
+  @@index([reporterId])
+  @@index([resolvedById])
+}
+
+model ChatUserBlock {
+  id            String   @id @default(cuid())
+  blockerId     String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+  blocker       User     @relation("ChatUserBlockBlocker", fields: [blockerId], references: [id])
+  blockedUser   User     @relation("ChatUserBlockBlocked", fields: [blockedUserId], references: [id])
+
+  @@unique([blockerId, blockedUserId])
+  @@index([blockedUserId])
+}
+
+model ChatMessageReaction {
+  id        String      @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  message   ChatMessage @relation(fields: [messageId], references: [id])
+  user      User        @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+}
+
+model ChatMessageStar {
+  id        String      @id @default(cuid())
+  messageId String
+  userId    String
+  createdAt DateTime    @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id])
+  user      User        @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@index([userId, createdAt])
+}
+
+model ChatMessageHidden {
+  id             String           @id @default(cuid())
+  messageId      String
+  conversationId String
+  userId         String
+  hiddenAt       DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+  message        ChatMessage      @relation(fields: [messageId], references: [id])
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id])
+  user           User             @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
+  @@index([conversationId, userId])
+  @@index([userId, hiddenAt])
+}
+
+model ChatAttachment {
+  id                         String           @id @default(cuid())
+  communityId                String
+  conversationId             String
+  senderId                   String
+  storageKey                 String           @unique
+  encryptedSize              Int
+  mediaCategory              ChatMediaCategory @default(OTHER)
+  lifecycleStatus            ChatAttachmentLifecycle @default(ACTIVE)
+  viewOnce                   Boolean          @default(false)
+  encryptionNonce            String
+  encryptionAlgorithmVersion String
+  createdAt                  DateTime         @default(now())
+  retentionExpiresAt         DateTime?
+  deletionRequestedAt        DateTime?
+  deletionCompletedAt        DateTime?
+  deletionError              String?
+  deletionAttempts           Int              @default(0)
+  deletedAt                  DateTime?
+  community                  Community        @relation(fields: [communityId], references: [id])
+  conversation               ChatConversation @relation(fields: [conversationId], references: [id])
+  sender                     User             @relation("ChatAttachmentSender", fields: [senderId], references: [id])
+  views                      ChatAttachmentView[]
+  deletionOperations         ChatMediaDeletionOperation[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@index([communityId, lifecycleStatus, createdAt])
+  @@index([communityId, lifecycleStatus, encryptedSize, createdAt])
+  @@index([communityId, mediaCategory, createdAt])
+  @@index([communityId, senderId, createdAt])
+  @@index([retentionExpiresAt, lifecycleStatus])
+}
+
+model ChatAttachmentView {
+  id             String           @id @default(cuid())
+  attachmentId   String
+  conversationId String
+  userId         String
+  openedAt       DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+  attachment     ChatAttachment   @relation(fields: [attachmentId], references: [id])
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id])
+  user           User             @relation(fields: [userId], references: [id])
+
+  @@unique([attachmentId, userId])
+  @@index([conversationId, userId])
+  @@index([userId, openedAt])
+}
+
+model ChatDevice {
+  id               String           @id @default(cuid())
+  communityId      String
+  userId           String
+  keyId            String
+  deviceIdentifier String
+  displayName      String
+  generatedLabel   String?
+  customDisplayName String?
+  deviceType       ChatDeviceType   @default(UNKNOWN)
+  operatingSystemName String?
+  operatingSystemVersion String?
+  browserName      String?
+  browserVersion   String?
+  status           ChatDeviceStatus @default(ACTIVE)
+  createdAt        DateTime         @default(now())
+  lastSeenAt       DateTime?
+  revokedAt        DateTime?
+  revokedById      String?
+  community        Community        @relation(fields: [communityId], references: [id])
+  user             User             @relation("ChatDeviceUser", fields: [userId], references: [id])
+  key              ChatDeviceKey    @relation(fields: [keyId], references: [id], onDelete: Restrict)
+  revokedBy        User?            @relation("ChatDeviceRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+
+  @@unique([communityId, userId, deviceIdentifier])
+  @@index([communityId, userId, status])
+  @@index([communityId, status, createdAt])
+  @@index([communityId, status, lastSeenAt, createdAt])
+  @@index([communityId, deviceType, lastSeenAt])
+  @@index([communityId, operatingSystemName, lastSeenAt])
+  @@index([communityId, browserName, lastSeenAt])
+  @@index([userId, status])
+  @@index([keyId])
+}
+
+model ChatDeviceKey {
+  id          String    @id @default(cuid())
+  userId      String
+  communityId String
+  publicKey   String
+  fingerprint String?
+  algorithm   String
+  version     Int       @default(1)
+  status      ChatKeyStatus @default(ACTIVE)
+  createdAt   DateTime  @default(now())
+  activatedAt DateTime?
+  retiredAt   DateTime?
+  rotatedAt   DateTime?
+  revokedAt   DateTime?
+  user        User      @relation(fields: [userId], references: [id])
+  community   Community @relation(fields: [communityId], references: [id])
+  devices     ChatDevice[]
+  senderMessages ChatMessage[] @relation("ChatMessageSenderKeyVersion")
+  recipientMessages ChatMessage[] @relation("ChatMessageRecipientKeyVersion")
+
+  @@unique([userId, communityId, version])
+  @@unique([userId, communityId, fingerprint])
+  @@index([userId, communityId, status])
+  @@index([communityId, status, createdAt])
+  @@index([fingerprint])
+}
+
+model CommunityChatStorageUsage {
+  communityId     String   @id
+  totalBytes      BigInt   @default(0)
+  imageBytes      BigInt   @default(0)
+  videoBytes      BigInt   @default(0)
+  audioBytes      BigInt   @default(0)
+  documentBytes   BigInt   @default(0)
+  otherBytes      BigInt   @default(0)
+  attachmentCount BigInt   @default(0)
+  updatedAt       DateTime @updatedAt
+  community       Community @relation(fields: [communityId], references: [id])
+}
+
+model ChatMediaDeletionOperation {
+  id            String                  @id @default(cuid())
+  communityId   String
+  attachmentId  String
+  requestedById String
+  reason        String?
+  status        ChatMediaDeletionStatus @default(PENDING)
+  attempts      Int                     @default(0)
+  idempotencyKey String                 @unique
+  errorCode     String?
+  requestedAt   DateTime                @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  updatedAt     DateTime                @updatedAt
+  community     Community               @relation(fields: [communityId], references: [id])
+  attachment    ChatAttachment          @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  requestedBy   User                    @relation("ChatMediaDeletionRequestedBy", fields: [requestedById], references: [id])
+
+  @@index([communityId, status, requestedAt])
+  @@index([attachmentId, status])
+}
+
+model ChatPresence {
+  id          String    @id @default(cuid())
+  userId      String
+  communityId String
+  lastSeenAt  DateTime?
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id])
+  community   Community @relation(fields: [communityId], references: [id])
+
+  @@unique([userId, communityId])
+  @@index([communityId])
+}
+
+model NotificationPreference {
+  id                            String   @id @default(cuid())
+  userId                        String
+  communityId                   String
+  announcementNotifications     Boolean  @default(true)
+  eventNotifications            Boolean  @default(true)
+  birthdayReminderNotifications Boolean  @default(true)
+  passportExpirationRemindersEnabled Boolean @default(true)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  @@unique([userId, communityId])
+}
+
+model CommunityReminderSettings {
+  id                              String    @id @default(cuid())
+  communityId                     String    @unique
+  birthdayReminderEnabled          Boolean   @default(true)
+  birthdayReminderDaysBefore       Int       @default(3)
+  birthdayDayNotificationEnabled   Boolean   @default(true)
+  birthdayNotifyAllMembers         Boolean   @default(false)
+  anniversaryReminderEnabled       Boolean   @default(true)
+  anniversaryReminderDaysBefore    Int       @default(3)
+  anniversaryDayNotificationEnabled Boolean  @default(true)
+  birthdayReminderTemplate         String    @default("{{memberName}} has a birthday coming up in {{communityName}} on {{date}}.")
+  birthdayDayTemplate              String    @default("Happy birthday, {{memberName}}!")
+  anniversaryReminderTemplate      String    @default("{{memberName}} reaches a {{years}} year membership anniversary in {{communityName}} on {{date}}.")
+  anniversaryDayTemplate           String    @default("{{memberName}} reaches a {{years}} year membership anniversary today.")
+  passportRemindersEnabled         Boolean   @default(false)
+  passportNotifyMember             Boolean   @default(true)
+  passportNotifyAdmins             Boolean   @default(true)
+  passportEmailEnabled             Boolean   @default(false)
+  passportFirstReminderDaysBefore  Int       @default(180)
+  passportSecondReminderDaysBefore Int       @default(90)
+  passportFinalReminderDaysBefore  Int       @default(30)
+  passportDayOfReminderEnabled     Boolean   @default(true)
+  passportReminderTemplate         String    @default("Your passport is scheduled to expire on {{expirationDate}}. Please review your document details and renew it before the expiration date.")
+  passportDayOfTemplate            String    @default("Your passport expires today. Please review your document details.")
+  createdAt                       DateTime  @default(now())
+  updatedAt                       DateTime  @updatedAt
+  community                       Community @relation(fields: [communityId], references: [id])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  communityId String
+  name        String
+  key         String
+  community   Community        @relation(fields: [communityId], references: [id])
+  memberships Membership[]
+  permissions RolePermission[]
+
+  @@unique([communityId, key])
+}
+
+model Permission {
+  id    String           @id @default(cuid())
+  key   String           @unique
+  label String
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model RegistrationApplication {
+  id          String            @id @default(cuid())
+  communityId String
+  inviteLinkId String?
+  email       String
+  normalizedEmail String
+  name        String
+  sex         String?
+  note        String
+  passwordHash String?
+  status      ApplicationStatus @default(PENDING)
+  submissionAttemptCount Int @default(1)
+  lastSubmissionAttemptAt DateTime @default(now())
+  lastReminderQueuedAt DateTime?
+  lastSecurityNoticeQueuedAt DateTime?
+  lastNotificationSuppressedAt DateTime?
+  lastNotificationSuppressionReason String?
+  lastIpHash String?
+  reviewedAt  DateTime?
+  reviewedBy  String?
+  createdAt   DateTime          @default(now())
+  community   Community         @relation(fields: [communityId], references: [id])
+  inviteLink   CommunityInviteLink? @relation(fields: [inviteLinkId], references: [id])
+
+  @@index([communityId, normalizedEmail])
+}
+
+model CommunityInviteLink {
+  id              String                    @id @default(cuid())
+  communityId     String
+  tokenHash       String                    @unique
+  createdByUserId String
+  createdAt       DateTime                  @default(now())
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  maxUses         Int?
+  useCount        Int                       @default(0)
+  lastUsedAt      DateTime?
+  community       Community                 @relation(fields: [communityId], references: [id])
+  createdBy       User                      @relation(fields: [createdByUserId], references: [id])
+  applications    RegistrationApplication[]
+
+  @@index([communityId, revokedAt, expiresAt])
+}
+
+model Event {
+  id          String      @id @default(cuid())
+  communityId String
+  title       String
+  description String
+  startsAt    DateTime
+  location    String
+  onlineUrl   String?
+  capacity    Int?
+  community   Community   @relation(fields: [communityId], references: [id])
+  rsvps       EventRsvp[]
+  tasks       EventTask[]
+  taskActivities EventTaskActivity[]
+  taskComments EventTaskComment[]
+  taskAttachments EventTaskAttachment[]
+  taskChecklistItems EventTaskChecklistItem[]
+  taskBoard     TaskBoard?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @default(now()) @updatedAt
+}
+
+model TaskBoardAutomationRule {
+  id          String   @id @default(cuid())
+  communityId String
+  boardId     String
+  type        TaskBoardAutomationRuleType
+  name        String?
+  enabled     Boolean  @default(true)
+  config      Json
+  draftName        String?
+  draftEnabled     Boolean?
+  draftConfig      Json?
+  draftUpdatedAt   DateTime?
+  draftUpdatedById String?
+  currentVersion Int @default(1)
+  lastRunAt   DateTime?
+  lastRunStatus TaskBoardAutomationRunStatus?
+  lastRunMode TaskBoardAutomationRunMode?
+  lastRunSummary String?
+  archivedAt  DateTime?
+  archivedById String?
+  archiveReason String?
+  createdFromPresetId String?
+  createdFromPresetRuleId String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  board       TaskBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  createdBy   User @relation("TaskBoardAutomationRuleCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  draftUpdatedBy User? @relation("TaskBoardAutomationRuleDraftUpdatedBy", fields: [draftUpdatedById], references: [id], onDelete: SetNull)
+  archivedBy User? @relation("TaskBoardAutomationRuleArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  createdFromPreset TaskBoardAutomationPreset? @relation("TaskBoardAutomationRulePresetOrigin", fields: [createdFromPresetId], references: [id], onDelete: SetNull)
+  createdFromPresetRule TaskBoardAutomationPresetRule? @relation("TaskBoardAutomationRulePresetRuleOrigin", fields: [createdFromPresetRuleId], references: [id], onDelete: SetNull)
+  runs        TaskBoardAutomationRun[]
+  versions    TaskBoardAutomationRuleVersion[]
+
+  @@index([communityId, boardId])
+  @@index([communityId, type])
+  @@index([communityId, enabled])
+  @@index([communityId, draftUpdatedAt])
+  @@index([communityId, boardId, archivedAt])
+  @@index([createdFromPresetId])
+}
+
+model TaskBoardAutomationRuleVersion {
+  id            String   @id @default(cuid())
+  communityId   String
+  boardId       String
+  ruleId        String
+  version       Int
+  type          TaskBoardAutomationRuleType
+  enabled       Boolean
+  name          String?
+  config        Json
+  changeType    TaskBoardAutomationRuleChangeType
+  changeSummary String?
+  changedById   String?
+  createdAt     DateTime @default(now())
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  board         TaskBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  rule          TaskBoardAutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  changedBy     User? @relation("TaskBoardAutomationRuleVersionChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@unique([ruleId, version])
+  @@index([communityId, boardId, createdAt])
+  @@index([communityId, ruleId, createdAt])
+}
+
+model TaskBoardAutomationPreset {
+  id          String   @id @default(cuid())
+  communityId String
+  name        String
+  description String?
+  archivedAt  DateTime?
+  createdById String
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdBy   User @relation("TaskBoardAutomationPresetCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  updatedBy   User? @relation("TaskBoardAutomationPresetUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  rules       TaskBoardAutomationPresetRule[]
+  appliedRules TaskBoardAutomationRule[] @relation("TaskBoardAutomationRulePresetOrigin")
+
+  @@index([communityId, archivedAt])
+  @@index([communityId, updatedAt])
+}
+
+model TaskBoardAutomationPresetRule {
+  id        String   @id @default(cuid())
+  presetId  String
+  position  Int
+  type      TaskBoardAutomationRuleType
+  name      String?
+  enabled   Boolean  @default(true)
+  config    Json
+  createdAt DateTime @default(now())
+  preset    TaskBoardAutomationPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  appliedRules TaskBoardAutomationRule[] @relation("TaskBoardAutomationRulePresetRuleOrigin")
+
+  @@index([presetId, position])
+  @@index([presetId, type])
+}
+
+model TaskBoardAutomationRun {
+  id           String   @id @default(cuid())
+  communityId  String
+  boardId      String
+  ruleId       String
+  taskId       String?
+  status       TaskBoardAutomationRunStatus
+  mode         TaskBoardAutomationRunMode @default(LIVE)
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+  summary      String?
+  details      Json?
+  errorCode    String?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  community    Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  board        TaskBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  rule         TaskBoardAutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  task         EventTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([communityId, boardId, createdAt])
+  @@index([communityId, ruleId, createdAt])
+  @@index([communityId, status])
+  @@index([communityId, mode])
+}
+
+model EventTask {
+  id          String            @id @default(cuid())
+  communityId String
+  eventId     String
+  taskBoardId String?
+  title       String
+  description String?
+  status      EventTaskStatus   @default(TODO)
+  priority    EventTaskPriority @default(MEDIUM)
+  label       String?
+  dueDate     DateTime?
+  assigneeId  String?
+  createdById String
+  sortOrder   Int               @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  community   Community         @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  event       Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  taskBoard   TaskBoard?        @relation(fields: [taskBoardId], references: [id], onDelete: Cascade)
+  assignee    User?             @relation("EventTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assignees   EventTaskAssignee[]
+  createdBy   User              @relation("EventTaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  activities  EventTaskActivity[]
+  comments    EventTaskComment[]
+  attachments EventTaskAttachment[]
+  checklistItems EventTaskChecklistItem[]
+  automationRuns TaskBoardAutomationRun[]
+
+  @@index([communityId, eventId])
+  @@index([communityId, taskBoardId])
+  @@index([communityId, assigneeId])
+  @@index([communityId, status])
+  @@index([eventId, status, sortOrder])
+}
+
+model EventTaskAssignee {
+  id           String    @id @default(cuid())
+  communityId  String
+  taskId       String
+  userId       String
+  assignedById String?
+  assignedAt   DateTime  @default(now())
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  community    Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  task         EventTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user         User      @relation("EventTaskAssignedUser", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy   User?     @relation("EventTaskAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@unique([taskId, userId])
+  @@index([communityId, userId])
+  @@index([communityId, taskId])
+}
+
+model TaskBoard {
+  id          String              @id @default(cuid())
+  communityId String
+  eventId     String?             @unique
+  name        String
+  description String?
+  visibility  TaskBoardVisibility @default(PRIVATE)
+  status      TaskBoardStatus     @default(ACTIVE)
+  createdById String
+  archivedAt  DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  community   Community           @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  event       Event?              @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  createdBy   User                @relation("TaskBoardCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  tasks       EventTask[]
+  automationRules TaskBoardAutomationRule[]
+  automationRuleVersions TaskBoardAutomationRuleVersion[]
+  automationRuns TaskBoardAutomationRun[]
+
+  @@index([communityId, archivedAt])
+  @@index([communityId, status, archivedAt])
+  @@index([communityId, visibility])
+}
+
+model EventTaskTemplate {
+  id          String   @id @default(cuid())
+  communityId String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdById String
+  archivedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdBy   User @relation("EventTaskTemplateCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  items       EventTaskTemplateItem[]
+
+  @@index([communityId, archivedAt])
+  @@index([communityId, isActive])
+}
+
+model EventTaskTemplateItem {
+  id            String   @id @default(cuid())
+  templateId    String
+  title         String
+  description   String?
+  priority      EventTaskPriority @default(MEDIUM)
+  label         String?
+  dueOffsetDays Int?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  template      EventTaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, sortOrder])
+}
+
+model EventTaskActivity {
+  id          String                @id @default(cuid())
+  communityId String
+  eventId     String
+  taskId      String
+  actorId     String?
+  type        EventTaskActivityType
+  message     String?
+  metadata    Json?
+  createdAt   DateTime              @default(now())
+  community   Community             @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  event       Event                 @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  task        EventTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor       User?                 @relation("EventTaskActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([communityId, eventId, taskId, createdAt])
+  @@index([communityId, actorId])
+}
+
+model EventTaskComment {
+  id          String    @id @default(cuid())
+  communityId String
+  eventId     String
+  taskId      String
+  authorId    String
+  body        String
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  event       Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  task        EventTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author      User      @relation("EventTaskCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([communityId, eventId, taskId, createdAt])
+  @@index([communityId, authorId])
+}
+
+model EventTaskAttachment {
+  id           String   @id @default(cuid())
+  communityId  String
+  eventId      String
+  taskId       String
+  uploaderId   String
+  originalName String
+  storageKey   String
+  mimeType     String
+  sizeBytes    Int
+  archivedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  community    Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  event        Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  task         EventTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader     User @relation("EventTaskAttachmentUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([communityId, eventId, taskId, createdAt])
+  @@index([communityId, uploaderId])
+  @@index([storageKey])
+}
+
+model EventTaskChecklistItem {
+  id            String    @id @default(cuid())
+  communityId   String
+  eventId       String
+  taskId        String
+  title         String
+  isCompleted   Boolean   @default(false)
+  sortOrder     Int       @default(0)
+  createdById   String
+  completedById String?
+  completedAt   DateTime?
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  task          EventTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdBy     User      @relation("EventTaskChecklistItemCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  completedBy   User?     @relation("EventTaskChecklistItemCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+
+  @@index([communityId, eventId, taskId, sortOrder])
+  @@index([communityId, createdById])
+  @@index([communityId, completedById])
+}
+
+model EventRsvp {
+  id        String     @id @default(cuid())
+  eventId   String
+  userId    String
+  status    RsvpStatus @default(GOING)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  event     Event      @relation(fields: [eventId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
+
+  @@unique([eventId, userId])
+}
+
+model Announcement {
+  id          String    @id @default(cuid())
+  communityId String
+  title       String
+  body        String
+  status      AnnouncementStatus @default(DRAFT)
+  authorMode  AnnouncementAuthorMode @default(USER)
+  publishedAt DateTime?
+  deletedAt   DateTime?
+  community   Community @relation(fields: [communityId], references: [id])
+  likes       FeedLike[]
+  comments    FeedComment[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model FeedLike {
+  id             String       @id @default(cuid())
+  communityId    String
+  announcementId String
+  userId         String
+  createdAt      DateTime     @default(now())
+  community      Community    @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, userId])
+  @@index([communityId])
+  @@index([announcementId])
+  @@index([userId])
+}
+
+model FeedComment {
+  id             String       @id @default(cuid())
+  communityId    String
+  announcementId String
+  userId         String
+  parentId       String?
+  body           String
+  authorMode     FeedCommentAuthorMode @default(USER)
+  createdAt      DateTime     @default(now())
+  community      Community    @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent         FeedComment? @relation("FeedCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies        FeedComment[] @relation("FeedCommentReplies")
+  likes          FeedCommentLike[]
+
+  @@index([communityId])
+  @@index([announcementId, createdAt])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model FeedCommentLike {
+  id          String      @id @default(cuid())
+  communityId String
+  commentId   String
+  userId      String
+  createdAt   DateTime    @default(now())
+  community   Community   @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  comment     FeedComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([communityId])
+  @@index([commentId])
+  @@index([userId])
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  communityId String
+  userId      String?
+  type        String    @default("GENERAL")
+  title       String
+  body        String
+  metadata    Json?
+  dedupeKey   String?   @unique
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+  community   Community @relation(fields: [communityId], references: [id])
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  communityId String
+  actorUserId String?
+  action      String
+  targetType  String
+  targetId    String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  community   Community @relation(fields: [communityId], references: [id])
+
+  @@index([communityId, createdAt])
+  @@index([communityId, action, createdAt])
+  @@index([communityId, actorUserId, createdAt])
+  @@index([communityId, targetType, targetId])
+}
+
+model EmailCampaign {
+  id          String    @id @default(cuid())
+  communityId String
+  type        String
+  subject     String
+  textBody    String
+  htmlBody    String?
+  metadata    Json?
+  status      String    @default("QUEUED")
+  createdById String?
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  community   Community @relation(fields: [communityId], references: [id])
+  createdBy   User?     @relation(fields: [createdById], references: [id])
+  recipients  EmailRecipient[]
+  attempts    EmailDeliveryAttempt[]
+
+  @@index([communityId, createdAt])
+}
+
+model EmailRecipient {
+  id           String    @id @default(cuid())
+  campaignId   String
+  userId       String?
+  email        String
+  name         String?
+  status       String    @default("PENDING")
+  errorMessage String?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+  campaign     EmailCampaign @relation(fields: [campaignId], references: [id])
+  attempts     EmailDeliveryAttempt[]
+
+  @@index([campaignId, status])
+}
+
+model EmailDeliveryAttempt {
+  id                String   @id @default(cuid())
+  campaignId        String
+  recipientId       String?
+  status            String
+  providerMessageId String?
+  errorMessage      String?
+  attemptedAt       DateTime @default(now())
+  campaign          EmailCampaign @relation(fields: [campaignId], references: [id])
+  recipient         EmailRecipient? @relation(fields: [recipientId], references: [id])
+
+  @@index([campaignId, attemptedAt])
+  @@index([recipientId])
+}
+
+model Session {
+  id             String   @id @default(cuid())
+  userId         String
+  tokenHash      String   @unique
+  expiresAt      DateTime
+  lastActivityAt DateTime @default(now())
+  idleExpiresAt  DateTime
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@index([idleExpiresAt])
+}

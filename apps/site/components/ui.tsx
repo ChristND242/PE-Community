@@ -1,0 +1,183 @@
+import Link from 'next/link';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { AppSelect } from './app-select';
+import { cn } from '../lib/utils';
+
+export function Button({ className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button className={cn('inline-flex items-center justify-center rounded-full bg-accent px-4 py-2 text-sm font-bold text-background transition hover:bg-[#74e4b1] disabled:opacity-50', className)} {...props} />;
+}
+
+export function GhostLink({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
+  return <Link href={href} className={cn('rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white', className)}>{children}</Link>;
+}
+
+export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn('rounded-lg border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/20', className)} {...props} />;
+}
+
+export function StatusBadge({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'good' | 'warn' | 'bad' | 'neutral' }) {
+  const tones = { good: 'bg-emerald-400/15 text-emerald-200', warn: 'bg-amber-400/15 text-amber-200', bad: 'bg-rose-400/15 text-rose-200', neutral: 'bg-white/10 text-white/70' };
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase ${tones[tone]}`}>{children}</span>;
+}
+
+export function EmptyState({ text }: { text: string }) {
+  return <div className="rounded-lg border border-dashed border-white/15 p-8 text-center text-sm text-white/60">{text}</div>;
+}
+
+export function Spinner({ className }: { className?: string }) {
+  return <span className={cn('h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent', className)} aria-hidden="true" />;
+}
+
+export function LoadingButton({
+  loading,
+  loadingLabel,
+  children,
+  className,
+  disabled,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean; loadingLabel?: string }) {
+  return (
+    <Button className={cn('gap-2', className)} disabled={disabled || loading} {...props}>
+      {loading && <Spinner />}
+      {loading ? (loadingLabel ?? children) : children}
+    </Button>
+  );
+}
+
+export function TableEmptyState({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.025] px-5 py-10 text-center">
+      <p className="text-sm font-semibold text-white">{title}</p>
+      {description && <p className="mt-2 text-sm text-white/50">{description}</p>}
+    </div>
+  );
+}
+
+export function TableErrorState({ title, retryLabel, onRetry }: { title: string; retryLabel: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-rose-300/20 bg-rose-300/10 px-5 py-5 text-sm text-rose-100 sm:flex-row sm:items-center sm:justify-between">
+      <span>{title}</span>
+      <Button onClick={onRetry} className="bg-rose-200 text-rose-950 hover:bg-rose-100">{retryLabel}</Button>
+    </div>
+  );
+}
+
+export function TableSkeleton({ rows = 5, columns = 6 }: { rows?: number; columns?: number }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
+      {Array.from({ length: rows }).map((_, row) => (
+        <div key={row} className="grid animate-pulse gap-3 border-b border-white/10 px-4 py-4 last:border-b-0" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+          {Array.from({ length: columns }).map((__, column) => (
+            <span key={column} className="h-4 rounded bg-white/10" />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function DataTablePagination({
+  page,
+  pageSize,
+  pageSizeOptions,
+  total,
+  previousLabel,
+  nextLabel,
+  rowsPerPageLabel,
+  showingLabel,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageSize: number;
+  pageSizeOptions: number[];
+  total: number;
+  previousLabel: string;
+  nextLabel: string;
+  rowsPerPageLabel: string;
+  showingLabel: string;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 text-sm text-white/55 sm:flex-row sm:items-center sm:justify-between">
+      <span>{showingLabel}</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <AppSelect value={pageSize} label={rowsPerPageLabel} options={pageSizeOptions.map((option) => ({ value: option, label: String(option) }))} onChange={onPageSizeChange} className="min-w-[7rem]" />
+        <button
+          type="button"
+          aria-label={previousLabel}
+          title={previousLabel}
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-white/10 bg-transparent text-white/60 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30 disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label={nextLabel}
+          title={nextLabel}
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+          className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-white/10 bg-transparent text-white/60 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30 disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel,
+  cancelLabel,
+  loading,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  loading?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0d1412] p-5 shadow-2xl shadow-black/50">
+        <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-white/60">{description}</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button className="bg-white/10 text-white hover:bg-white/15" onClick={onCancel} disabled={loading}>{cancelLabel}</Button>
+          <LoadingButton loading={loading} onClick={onConfirm}>{confirmLabel}</LoadingButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Metric({ label, value }: { label: string; value: string | number }) {
+  return <Card><p className="text-sm text-white/55">{label}</p><p className="mt-3 text-3xl font-black text-white">{value}</p></Card>;
+}
+
+export function Bars({ data }: { data: { label: string; value: number }[] }) {
+  const max = Math.max(1, ...data.map((item) => item.value));
+  return (
+    <div className="space-y-4">
+      {data.map((item) => (
+        <div key={item.label}>
+          <div className="mb-1 flex justify-between text-xs text-white/60"><span>{item.label}</span><span>{item.value}</span></div>
+          <div className="h-2 rounded-full bg-white/10"><div className="h-2 rounded-full bg-gradient-to-r from-accent to-cyan-300" style={{ width: `${(item.value / max) * 100}%` }} /></div>
+        </div>
+      ))}
+    </div>
+  );
+}

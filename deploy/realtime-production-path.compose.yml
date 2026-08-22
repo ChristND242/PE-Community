@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pe_community
+      POSTGRES_PASSWORD: realtime-integration-database-only
+      POSTGRES_USER: pe
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pe -d pe_community"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      API_PORT: "4000"
+      API_PUBLIC_URL: http://caddy
+      DATABASE_URL: postgresql://pe:realtime-integration-database-only@postgres:5432/pe_community?schema=public
+      JWT_SECRET: realtime-integration-jwt-secret-only
+      NODE_ENV: production
+      PASSWORD_PEPPER: realtime-integration-pepper-value-32-bytes-minimum
+      REDIS_URL: redis://redis:6379
+      REALTIME_DIAGNOSTICS: "true"
+      SESSION_COOKIE_SECURE: "false"
+      SETUP_TOKEN: realtime-integration-setup-token-only
+      UPLOADS_DIR: /tmp/pe-realtime-uploads
+      WEB_ORIGIN: http://caddy
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "4000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health >/dev/null 2>&1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    networks:
+      default:
+        aliases:
+          - web
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: :80
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  realtime-test:
+    image: node:22-alpine
+    working_dir: /workspace
+    command: ["node", "deploy/realtime-production-path.test.mjs"]
+    environment:
+      REALTIME_TEST_BASE_URL: http://caddy
+      REALTIME_TEST_MODE: "${REALTIME_TEST_MODE:-verify}"
+      REALTIME_TEST_SETUP_TOKEN: realtime-integration-setup-token-only
+    volumes:
+      - ..:/workspace:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      caddy:
+        condition: service_started

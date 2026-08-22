@@ -1,0 +1,42 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://pe:validation-only@localhost:5432/pe_community
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma validate --schema prisma/schema.prisma
+      - run: pnpm db:generate
+      - run: pnpm --filter @pe/api test
+        env:
+          PASSWORD_PEPPER: synthetic-ci-password-pepper-at-least-32-bytes
+          EMAIL_ENCRYPTION_KEY: synthetic-ci-email-key-at-least-32-bytes
+          JWT_SECRET: synthetic-ci-jwt-secret-at-least-32-bytes
+      - run: pnpm --filter @pe/worker test
+      - run: pnpm --filter @pe/web test
+      - run: pnpm --filter @pe/api build
+      - run: pnpm --filter @pe/worker build
+      - run: pnpm --filter @pe/web exec tsc --noEmit
+      - run: pnpm --filter @pe/web build
+      - run: pnpm --filter @pe/site exec tsc --noEmit
+      - run: pnpm --filter @pe/site build
+      - run: pnpm release:check
