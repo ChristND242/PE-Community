@@ -25,9 +25,7 @@ services:
       retries: 20
 
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    image: ghcr.io/pona-ekolo/pe-community-api:${PE_COMMUNITY_VERSION:?set PE_COMMUNITY_VERSION in .env}
     env_file: .env
     environment:
       NODE_ENV: production
@@ -53,9 +51,7 @@ services:
       retries: 20
 
   worker:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
+    image: ghcr.io/pona-ekolo/pe-community-worker:${PE_COMMUNITY_VERSION:?set PE_COMMUNITY_VERSION in .env}
     env_file: .env
     environment:
       NODE_ENV: production
@@ -71,12 +67,7 @@ services:
         condition: service_healthy
 
   web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-/api/v1}"
-        NEXT_PUBLIC_REALTIME_ORIGIN: "${NEXT_PUBLIC_REALTIME_ORIGIN:-}"
+    image: ghcr.io/pona-ekolo/pe-community-web:${PE_COMMUNITY_VERSION:?set PE_COMMUNITY_VERSION in .env}
     env_file: .env
     environment:
       NODE_ENV: production
