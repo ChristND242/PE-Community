@@ -9,6 +9,12 @@
 
 PE Community est un espace de travail auto-hébergé destiné à la gestion d'une communauté privée. Il réunit l'administration des membres, les événements, les annonces, les tableaux de tâches, les automatisations, les notifications, les journaux d'audit et les discussions chiffrées entre participants dans une application bilingue.
 
+<img width="954" height="473" alt="pe-admin-dashboard-light" src="https://github.com/user-attachments/assets/5a79e70a-3aa6-4810-962f-34efd2e6af8f" />
+
+<img width="954" height="473" alt="pe-admin-dashboard-night" src="https://github.com/user-attachments/assets/665e8e8f-fb67-4539-9dfa-abc69269e934" />
+
+
+
 ## Présentation
 
 Le projet propose des espaces distincts pour les propriétaires, les administrateurs et les membres au sein d'une plateforme communautaire commune. Il est distribué sous la forme d'une pile Docker Compose construite depuis les sources et comprend un site bilingue de présentation et de documentation opérationnelle.
@@ -62,9 +68,9 @@ Ouvrez `WEB_ORIGIN` et terminez la configuration unique. N'exécutez pas les don
 
 ## Configuration
 
-Le fichier [`.env.example`](.env.example) assaini répertorie les variables prises en charge pour le déploiement public. La documentation opérationnelle bilingue détaillée se trouve dans `apps/site` ; exécutez `pnpm site:dev` pour la consulter localement.
+Le fichier [`.env.example`](.env.example) répertorie les variables prises en charge pour le déploiement public. La documentation opérationnelle bilingue détaillée se trouve dans `apps/site` ; soit le site public.
 
-Traitez les secrets JWT, les poivres de mot de passe, les clés de chiffrement, les identifiants de base de données, les jetons de configuration et de récupération ainsi que les identifiants SMTP comme des secrets de production. Ne les validez jamais dans Git.
+Traitez les secrets JWT, les poivres de mot de passe, les clés de chiffrement, les identifiants de base de données, les jetons de configuration et de récupération ainsi que les identifiants SMTP comme des secrets de production.
 
 ## Configuration Initiale
 
@@ -78,7 +84,7 @@ Le chiffrement des discussions protège le contenu des messages et des pièces j
 
 ## Documentation
 
-Les guides complets en anglais et en français concernant le produit, l'administration, le déploiement, les sauvegardes, la sécurité et le dépannage sont maintenus dans `apps/site`. Les README du dépôt restent des points d'entrée concis et ne dupliquent pas cette documentation.
+Les guides complets en anglais et en français concernant le produit, l'administration, le déploiement, les sauvegardes, la sécurité et le dépannage sont maintenus dans `apps/site`, soit le site public.
 
 ## Développement
 
