@@ -86,7 +86,7 @@ const productionComposeExample = `services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: pe
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: pe_community
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -109,18 +109,16 @@ const productionComposeExample = `services:
       retries: 20
 
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    image: ghcr.io/pona-ekolo/pe-community-api:${PE_COMMUNITY_VERSION:?set PE_COMMUNITY_VERSION in .env}
     restart: unless-stopped
     env_file: .env
     environment:
       NODE_ENV: production
       API_PORT: "4000"
-      DATABASE_URL: postgresql://pe:\${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/pe_community?schema=public
+      DATABASE_URL: postgresql://pe:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/pe_community?schema=public
       REDIS_URL: redis://redis:6379
-      WEB_ORIGIN: \${WEB_ORIGIN:?set WEB_ORIGIN in .env}
-      API_PUBLIC_URL: \${API_PUBLIC_URL:-\${WEB_ORIGIN:?set WEB_ORIGIN in .env}}
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN in .env}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-${WEB_ORIGIN:?set WEB_ORIGIN in .env}}
       UPLOADS_DIR: /app/uploads
     volumes:
       - uploads_data:/app/uploads
@@ -138,14 +136,12 @@ const productionComposeExample = `services:
       retries: 20
 
   worker:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
+    image: ghcr.io/pona-ekolo/pe-community-worker:${PE_COMMUNITY_VERSION:?set PE_COMMUNITY_VERSION in .env}
     restart: unless-stopped
     env_file: .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://pe:\${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/pe_community?schema=public
+      DATABASE_URL: postgresql://pe:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/pe_community?schema=public
       REDIS_URL: redis://redis:6379
       UPLOADS_DIR: /app/uploads
     volumes:
@@ -157,20 +153,15 @@ const productionComposeExample = `services:
         condition: service_healthy
 
   web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: "\${NEXT_PUBLIC_API_URL:-/api/v1}"
-        NEXT_PUBLIC_REALTIME_ORIGIN: "\${NEXT_PUBLIC_REALTIME_ORIGIN:-}"
+    image: ghcr.io/pona-ekolo/pe-community-web:${PE_COMMUNITY_VERSION:?set PE_COMMUNITY_VERSION in .env}
     restart: unless-stopped
     env_file: .env
     environment:
       NODE_ENV: production
       WEB_PORT: "3000"
-      INTERNAL_API_URL: \${INTERNAL_API_URL:-http://api:4000}
-      NEXT_PUBLIC_API_URL: "\${NEXT_PUBLIC_API_URL:-/api/v1}"
-      NEXT_PUBLIC_REALTIME_ORIGIN: "\${NEXT_PUBLIC_REALTIME_ORIGIN:-}"
+      INTERNAL_API_URL: ${INTERNAL_API_URL:-http://api:4000}
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-/api/v1}"
+      NEXT_PUBLIC_REALTIME_ORIGIN: "${NEXT_PUBLIC_REALTIME_ORIGIN:-}"
     depends_on:
       api:
         condition: service_healthy
@@ -181,11 +172,11 @@ const productionComposeExample = `services:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
-      APP_DOMAIN: "\${APP_DOMAIN:-:80}"
+      APP_DOMAIN: "${APP_DOMAIN:-:80}"
     ports:
-      - "\${HTTP_PORT:-80}:80"
-      - "\${HTTPS_PORT:-443}:443"
-      - "\${HTTPS_PORT:-443}:443/udp"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
