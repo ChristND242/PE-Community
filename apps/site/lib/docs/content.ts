@@ -514,7 +514,7 @@ export const docsPages: Record<DocsPageKey, DocsPage> = {
         callout: {
           variant: 'note',
           title: 'Source-built release',
-          body: 'No prebuilt public container images are published. Keep the source tree, lockfile, Dockerfiles, Compose file, and Caddy configuration from the same reviewed release.',
+          body: 'This production Compose configuration uses the official versioned PE Community container images. Set `PE_COMMUNITY_VERSION` in `.env` before starting the stack. Using an explicit version keeps deployments reproducible and makes upgrades deliberate.',
         },
         code: {
           label: 'compose.yml',
