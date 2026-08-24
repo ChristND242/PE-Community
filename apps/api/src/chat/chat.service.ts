@@ -904,23 +904,30 @@ export class ChatService {
     return { blockedUserId, blocked: false, blockState: await this.directBlockState(user.id, blockedUserId) };
   }
 
-  async myDeviceKey(user: RequestUser) {
+  async myDeviceKey(user: RequestUser, currentDeviceIdentifier?: string) {
     await this.permissions.requirePermission(user, PERMISSIONS.chatView, user.communityId);
-    const key = await this.prisma.chatDeviceKey.findFirst({
+    const [key, keys] = await Promise.all([
+      this.prisma.chatDeviceKey.findFirst({
+        where: { userId: user.id, communityId: user.communityId, status: 'ACTIVE', revokedAt: null },
+        orderBy: { version: 'desc' },
+      }),
+      this.prisma.chatDeviceKey.findMany({
+        where: { userId: user.id, communityId: user.communityId },
+        orderBy: { version: 'desc' },
+      }),
+    ]);
+    const deviceAuthorized = Boolean(key && currentDeviceIdentifier && await this.prisma.chatDevice.findFirst({
       where: {
-        userId: user.id,
         communityId: user.communityId,
+        userId: user.id,
+        deviceIdentifier: currentDeviceIdentifier,
+        keyId: key.id,
         status: 'ACTIVE',
         revokedAt: null,
-        devices: { some: { status: 'ACTIVE', revokedAt: null } },
       },
-      orderBy: { version: 'desc' },
-    });
-    const identityExists = Boolean(await this.prisma.chatDeviceKey.findFirst({
-      where: { userId: user.id, communityId: user.communityId },
       select: { id: true },
     }));
-    return { key: key ? publicDeviceKey(key) : null, identityExists };
+    return { key: key ? publicDeviceKey(key) : null, keys: keys.map(publicDeviceKey), identityExists: keys.length > 0, deviceAuthorized };
   }
 
   async registerMyDeviceKey(user: RequestUser, body: Record<string, unknown>) {
@@ -950,20 +957,6 @@ export class ChatService {
       let existingDevice = await tx.chatDevice.findUnique({
         where: { communityId_userId_deviceIdentifier: { communityId: user.communityId, userId: user.id, deviceIdentifier } },
       });
-      if (existingDevice?.status === 'ACTIVE') {
-        const key = await tx.chatDeviceKey.findUniqueOrThrow({ where: { id: existingDevice.keyId } });
-        if (key.fingerprint !== fingerprint) throw new ConflictException('This device is already linked to another chat identity.');
-        const updatedDevice = await tx.chatDevice.update({
-          where: { id: existingDevice.id },
-          data: {
-            ...metadata,
-            displayName: existingDevice.customDisplayName ?? metadata.generatedLabel,
-            lastSeenAt: new Date(),
-          },
-        });
-        return { key: publicDeviceKey(key), device: publicChatDevice(updatedDevice, deviceIdentifier) };
-      }
-
       let retainedKey = await tx.chatDeviceKey.findFirst({
         where: {
           userId: user.id,
@@ -982,6 +975,21 @@ export class ChatService {
         where: { userId: user.id, communityId: user.communityId },
         orderBy: { version: 'desc' },
       });
+      if (existingDevice?.status === 'ACTIVE' && requestedMode === 'initial') {
+        const existingKey = await tx.chatDeviceKey.findUniqueOrThrow({ where: { id: existingDevice.keyId } });
+        if (existingKey.fingerprint !== fingerprint || existingKey.status !== 'ACTIVE') {
+          throw new ConflictException('CHAT_DEVICE_IDENTITY_CONFLICT');
+        }
+        const updatedDevice = await tx.chatDevice.update({
+          where: { id: existingDevice.id },
+          data: {
+            ...metadata,
+            displayName: existingDevice.customDisplayName ?? metadata.generatedLabel,
+            lastSeenAt: new Date(),
+          },
+        });
+        return { key: publicDeviceKey(existingKey), device: publicChatDevice(updatedDevice, deviceIdentifier) };
+      }
       if (requestedMode === 'restore' && retainedKey && !existingDevice) {
         existingDevice = await tx.chatDevice.findFirst({
           where: {
@@ -1003,6 +1011,8 @@ export class ChatService {
       let key = retainedKey;
       if (requestedMode === 'initial') {
         if (anyExistingKey && !retainedKey) throw new ConflictException('CHAT_RESTORE_OR_ROTATION_REQUIRED');
+        if (retainedKey?.status === 'REVOKED') throw new ConflictException('CHAT_KEY_REVOKED');
+        if (retainedKey && retainedKey.status !== 'ACTIVE') throw new ConflictException('CHAT_RESTORE_OR_ROTATION_REQUIRED');
         if (!key) {
           key = await tx.chatDeviceKey.create({
             data: {
@@ -1020,6 +1030,7 @@ export class ChatService {
       } else if (requestedMode === 'restore') {
         if (!retainedKey || retainedKey.publicKey !== publicKey) throw new ConflictException('CHAT_BACKUP_KEY_MISMATCH');
         if (retainedKey.status === 'REVOKED') throw new ConflictException('CHAT_KEY_REVOKED');
+        if (retainedKey.status !== 'ACTIVE') throw new ConflictException('CHAT_RETIRED_KEY_HISTORY_ONLY');
       } else {
         if (retainedKey) throw new ConflictException('CHAT_KEY_ALREADY_REGISTERED');
         const latestVersion = anyExistingKey?.version ?? 0;
@@ -1081,7 +1092,7 @@ export class ChatService {
     });
   }
 
-  async verifyRestoredKey(user: RequestUser, body: Record<string, unknown>) {
+  async verifyRestoredKey(user: RequestUser, body: Record<string, unknown>, currentDeviceIdentifier?: string) {
     await this.permissions.requirePermission(user, PERMISSIONS.chatView, user.communityId);
     const publicKey = boundedString(body.publicKey, 'Public key is required.', maxPublicKeyLength);
     const fingerprint = chatPublicKeyFingerprint(publicKey);
@@ -1090,9 +1101,8 @@ export class ChatService {
         userId: user.id,
         communityId: user.communityId,
         OR: [{ fingerprint }, { fingerprint: null, publicKey }],
-        status: { not: 'REVOKED' },
       },
-      select: { id: true, publicKey: true, version: true },
+      select: { id: true, publicKey: true, version: true, status: true },
       orderBy: { version: 'desc' },
     });
     if (!retained || retained.publicKey !== publicKey) {
@@ -1108,6 +1118,23 @@ export class ChatService {
       });
       throw new ConflictException('CHAT_BACKUP_KEY_MISMATCH');
     }
+    if (retained.status === 'REVOKED') throw new ConflictException('CHAT_KEY_REVOKED');
+    const activeKey = await this.prisma.chatDeviceKey.findFirst({
+      where: { userId: user.id, communityId: user.communityId, status: 'ACTIVE', revokedAt: null },
+      select: { id: true },
+      orderBy: { version: 'desc' },
+    });
+    const deviceAuthorized = Boolean(currentDeviceIdentifier && activeKey?.id === retained.id && await this.prisma.chatDevice.findFirst({
+      where: {
+        communityId: user.communityId,
+        userId: user.id,
+        deviceIdentifier: currentDeviceIdentifier,
+        keyId: retained.id,
+        status: 'ACTIVE',
+        revokedAt: null,
+      },
+      select: { id: true },
+    }));
     await this.prisma.auditLog.create({
       data: {
         communityId: user.communityId,
@@ -1118,7 +1145,14 @@ export class ChatService {
         metadata: { version: retained.version },
       },
     });
-    return { verified: true, keyVersionId: retained.id, version: retained.version };
+    return {
+      verified: true,
+      keyVersionId: retained.id,
+      version: retained.version,
+      status: retained.status,
+      isCurrentActive: activeKey?.id === retained.id,
+      deviceAuthorized,
+    };
   }
 
   async myDevices(user: RequestUser, input: Record<string, unknown>, currentDeviceIdentifier?: string) {

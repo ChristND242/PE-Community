@@ -33,7 +33,7 @@ export class ChatController {
   @Get('keys/me')
   async myDeviceKey(@Req() req: Request) {
     const user = await requireUser(this.auth, req.cookies?.[this.auth.cookieName]);
-    return this.chat.myDeviceKey(user);
+    return this.chat.myDeviceKey(user, requestDeviceIdentifier(req));
   }
 
   @Post('keys/me')
@@ -45,7 +45,7 @@ export class ChatController {
   @Post('keys/restore/verify')
   async verifyRestoredKey(@Req() req: Request, @Body() body: Record<string, unknown>) {
     const user = await requireUser(this.auth, req.cookies?.[this.auth.cookieName]);
-    return this.chat.verifyRestoredKey(user, body);
+    return this.chat.verifyRestoredKey(user, body, requestDeviceIdentifier(req));
   }
 
   @Get('devices/me')

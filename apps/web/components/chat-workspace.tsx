@@ -8,10 +8,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { useChatSocket, type ChatReactionUpdate, type ChatRealtimeMessage } from '../hooks/use-chat-socket';
 import { dispatchChatUnreadRefresh } from '../hooks/use-chat-unread-count';
-import { exportEncryptedChatKeyBackup, importEncryptedChatKeyBackup } from '../lib/chat-key-recovery';
-import { CHAT_ATTACHMENT_ENCRYPTION_ALGORITHM, CHAT_ENCRYPTION_ALGORITHM, decryptChatAttachment, decryptChatMessage, encryptChatAttachment, encryptChatMessage, exportPrivateKey, exportPublicKey, generateChatKeyPair, importPublicKey } from '../lib/chat-crypto';
-import { createLocalChatKey, getLocalChatDeviceIdentity, getLocalChatKey, getLocalChatKeyRing, removeLocalChatKey, replaceLocalChatKey, type LocalChatDeviceIdentity, type LocalChatKeyPair } from '../lib/chat-key-store';
-import { apiFetch, apiUrl } from '../lib/api';
+import { CHAT_KEY_BACKUP_MAX_FILE_BYTES, exportEncryptedChatKeyBackup, importEncryptedChatKeyBackup } from '../lib/chat-key-recovery';
+import { CHAT_ATTACHMENT_ENCRYPTION_ALGORITHM, CHAT_ENCRYPTION_ALGORITHM, decryptChatAttachment, decryptChatMessage, encryptChatAttachment, encryptChatMessage, importPublicKey } from '../lib/chat-crypto';
+import { commitStagedLocalChatKey, getLocalChatDeviceIdentity, getLocalChatKeyRing, promoteRetainedLocalChatKey, reconcileLocalChatKeys, restoreLocalChatKeyState, snapshotLocalChatKeyState, stageGeneratedLocalChatKey, stageLocalChatKey, storeHistoricalLocalChatKey, type LocalChatDeviceIdentity, type LocalChatKeyPair } from '../lib/chat-key-store';
+import { ApiRequestError, apiFetch, apiUrl } from '../lib/api';
 import { detectClientDeviceInfo } from '../lib/chat-device-info';
 import { useI18n } from '../lib/i18n';
 import { userRoleLabel } from '../lib/user-role';
@@ -152,6 +152,27 @@ type ChatDeviceKey = {
   fingerprint?: string | null;
   version?: number;
   status?: 'ACTIVE' | 'RETIRED' | 'REVOKED' | string;
+};
+
+type ChatMyKeysResponse = {
+  key: ChatDeviceKey | null;
+  keys: ChatDeviceKey[];
+  identityExists: boolean;
+  deviceAuthorized: boolean;
+};
+
+type ChatKeyRegistrationResponse = {
+  key: ChatDeviceKey;
+  device: { status?: string; current?: boolean };
+};
+
+type ChatRestoreVerificationResponse = {
+  verified: boolean;
+  keyVersionId: string;
+  version: number;
+  status: 'ACTIVE' | 'RETIRED' | 'REVOKED' | string;
+  isCurrentActive: boolean;
+  deviceAuthorized: boolean;
 };
 
 type ChatParticipant = {
@@ -1054,7 +1075,7 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
     deviceIdentity = localDeviceIdentity ?? getLocalChatDeviceIdentity(user.id, user.communityId),
   ) {
     const deviceInfo = await detectClientDeviceInfo();
-    return apiFetch<{ key: ChatDeviceKey }>('/chat/keys/me', {
+    return apiFetch<ChatKeyRegistrationResponse>('/chat/keys/me', {
       method: 'POST',
       body: JSON.stringify({
         publicKey: localKey.publicKey,
@@ -1080,36 +1101,69 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
       setCurrentUser(user);
       const deviceIdentity = getLocalChatDeviceIdentity(user.id, user.communityId);
       setLocalDeviceIdentity(deviceIdentity);
-      const [localKey, remote] = await Promise.all([
-        getLocalChatKey(user.id, user.communityId),
-        apiFetch<{ key: ChatDeviceKey | null; identityExists: boolean }>('/chat/keys/me'),
-      ]);
+      const remote = await apiFetch<ChatMyKeysResponse>('/chat/keys/me', {
+        headers: { 'x-chat-device-id': deviceIdentity.deviceIdentifier },
+      });
+      const reconciled = await reconcileLocalChatKeys(
+        user.id,
+        user.communityId,
+        remote.keys.map((key) => ({ publicKey: key.publicKey, status: key.status ?? 'REVOKED' })),
+        remote.key?.publicKey ?? null,
+        remote.deviceAuthorized,
+      );
       if (shouldCancel()) return;
-      if (!localKey) {
-        if (remote.identityExists) {
-          setKeyStatus('restore-required');
-          return;
-        }
-        const created = await createLocalChatKey(user.id, user.communityId);
-        await registerLocalChatKey(user, created, 'initial', deviceIdentity);
-        if (shouldCancel()) return;
-        setLocalPrivateKey(created.privateKey);
-        setLocalPublicKey(created.publicKey);
-        setLocalKeyRing([created]);
+      setLocalPrivateKey(reconciled.current?.privateKey ?? null);
+      setLocalPublicKey(reconciled.current?.publicKey ?? '');
+      setLocalKeyRing(reconciled.keyRing);
+      if (reconciled.current && remote.key?.publicKey === reconciled.current.publicKey && remote.deviceAuthorized) {
         setKeyStatus('ready');
         return;
       }
-      setLocalPrivateKey(localKey.privateKey);
-      setLocalPublicKey(localKey.publicKey);
-      setLocalKeyRing(await getLocalChatKeyRing(user.id, user.communityId));
-      if (remote.key?.publicKey !== localKey.publicKey) {
-        setKeyStatus('restore-required');
+      if (!remote.identityExists) {
+        const snapshot = await snapshotLocalChatKeyState(user.id, user.communityId);
+        let registered = false;
+        try {
+          const candidate = await stageGeneratedLocalChatKey(user.id, user.communityId);
+          const response = await registerLocalChatKey(user, candidate, 'initial', deviceIdentity);
+          registered = true;
+          assertAuthorizedRegistration(response, candidate.publicKey);
+          const committed = await commitStagedLocalChatKey(user.id, user.communityId, candidate.publicKey);
+          if (shouldCancel()) return;
+          setLocalPrivateKey(committed.privateKey);
+          setLocalPublicKey(committed.publicKey);
+          setLocalKeyRing(await getLocalChatKeyRing(user.id, user.communityId));
+          setKeyStatus('ready');
+        } catch (error) {
+          if (!registered) await restoreLocalChatKeyState(user.id, user.communityId, snapshot);
+          throw error;
+        }
         return;
       }
-      await registerLocalChatKey(user, localKey, 'restore', deviceIdentity);
-      if (!shouldCancel()) setKeyStatus('ready');
-    } catch {
-      if (!shouldCancel()) setKeyStatus('failed');
+      if (reconciled.activeCandidate && remote.key?.publicKey === reconciled.activeCandidate.publicKey) {
+        const verification = await apiFetch<ChatRestoreVerificationResponse>('/chat/keys/restore/verify', {
+          method: 'POST',
+          headers: { 'x-chat-device-id': deviceIdentity.deviceIdentifier },
+          body: JSON.stringify({ publicKey: reconciled.activeCandidate.publicKey }),
+        });
+        if (verification.status === 'ACTIVE' && verification.isCurrentActive) {
+          const response = await registerLocalChatKey(user, reconciled.activeCandidate, 'restore', deviceIdentity);
+          assertAuthorizedRegistration(response, reconciled.activeCandidate.publicKey);
+          const promoted = await promoteRetainedLocalChatKey(user.id, user.communityId, reconciled.activeCandidate.publicKey);
+          if (!shouldCancel()) {
+            setLocalPrivateKey(promoted.privateKey);
+            setLocalPublicKey(promoted.publicKey);
+            setLocalKeyRing(await getLocalChatKeyRing(user.id, user.communityId));
+            setKeyStatus('ready');
+          }
+          return;
+        }
+      }
+      setKeyStatus('restore-required');
+    } catch (error) {
+      if (!shouldCancel()) {
+        setKeyStatus('failed');
+        toast.error(chatKeyErrorLabel(error, t));
+      }
     }
   }
 
@@ -1117,31 +1171,29 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
     if (!currentUser || !localDeviceIdentity || keyStatus === 'rotating' || identityRotationInFlightRef.current) return;
     identityRotationInFlightRef.current = true;
     setKeyStatus('rotating');
+    let snapshot: Awaited<ReturnType<typeof snapshotLocalChatKeyState>> = null;
+    let snapshotCaptured = false;
+    let registered = false;
     try {
-      const generated = await generateChatKeyPair();
-      const candidate = { privateKey: generated.privateKey, publicKey: await exportPublicKey(generated.publicKey) };
-      const previousPrivateKey = localPrivateKey ? await exportPrivateKey(localPrivateKey) : null;
-      const previousPublicKey = localPublicKey;
-      await replaceLocalChatKey(currentUser.id, currentUser.communityId, await exportPrivateKey(candidate.privateKey), candidate.publicKey);
-      try {
-        await registerLocalChatKey(currentUser, candidate, 'rotate', localDeviceIdentity);
-      } catch (error) {
-        if (previousPrivateKey && previousPublicKey) {
-          await replaceLocalChatKey(currentUser.id, currentUser.communityId, previousPrivateKey, previousPublicKey);
-        }
-        throw error;
-      }
-      setLocalPrivateKey(candidate.privateKey);
-      setLocalPublicKey(candidate.publicKey);
+      snapshot = await snapshotLocalChatKeyState(currentUser.id, currentUser.communityId);
+      snapshotCaptured = true;
+      const candidate = await stageGeneratedLocalChatKey(currentUser.id, currentUser.communityId);
+      const response = await registerLocalChatKey(currentUser, candidate, 'rotate', localDeviceIdentity);
+      registered = true;
+      assertAuthorizedRegistration(response, candidate.publicKey);
+      const committed = await commitStagedLocalChatKey(currentUser.id, currentUser.communityId, candidate.publicKey);
+      setLocalPrivateKey(committed.privateKey);
+      setLocalPublicKey(committed.publicKey);
       setLocalKeyRing(await getLocalChatKeyRing(currentUser.id, currentUser.communityId));
       setKeyStatus('ready');
       if (activeConversationId) await loadKeysForConversation(activeConversationId);
       setIdentityConfirmationOpen(false);
       setRecoveryPopupOpen(false);
       toast.success(t.chat.newIdentityCreated);
-    } catch {
+    } catch (error) {
+      if (!registered && snapshotCaptured) await restoreLocalChatKeyState(currentUser.id, currentUser.communityId, snapshot);
       setKeyStatus('restore-required');
-      toast.error(t.chat.newIdentityFailed);
+      toast.error(chatKeyErrorLabel(error, t, t.chat.newIdentityFailed));
     } finally {
       identityRotationInFlightRef.current = false;
     }
@@ -1551,37 +1603,63 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
       setKeyBackupMessage({ tone: 'bad', text: t.chat.backupImportFailed });
       return;
     }
+    if (keyBackupFile.size > CHAT_KEY_BACKUP_MAX_FILE_BYTES) {
+      setKeyBackupMessage({ tone: 'bad', text: t.chat.backupFileTooLarge });
+      return;
+    }
     setKeyBackupBusy(true);
+    const previousUiState = {
+      privateKey: localPrivateKey,
+      publicKey: localPublicKey,
+      keyRing: localKeyRing,
+      status: keyStatus,
+    };
+    let snapshot: Awaited<ReturnType<typeof snapshotLocalChatKeyState>> = null;
+    let staged = false;
+    let registered = false;
     try {
       const imported = await importEncryptedChatKeyBackup(JSON.parse(await keyBackupFile.text()), keyBackupPassword);
       const candidate = { privateKey: imported.privateKey, publicKey: imported.publicKeyJson };
-      await apiFetch('/chat/keys/restore/verify', {
+      const verification = await apiFetch<ChatRestoreVerificationResponse>('/chat/keys/restore/verify', {
         method: 'POST',
+        headers: { 'x-chat-device-id': localDeviceIdentity.deviceIdentifier },
         body: JSON.stringify({ publicKey: imported.publicKeyJson }),
       });
-      const previousPrivateKey = localPrivateKey ? await exportPrivateKey(localPrivateKey) : null;
-      const previousPublicKey = localPublicKey;
-      const localKey = await replaceLocalChatKey(currentUser.id, currentUser.communityId, imported.privateKeyJson, imported.publicKeyJson);
-      try {
-        await registerLocalChatKey(currentUser, candidate, 'restore', localDeviceIdentity);
-      } catch (error) {
-        if (previousPrivateKey && previousPublicKey) {
-          await replaceLocalChatKey(currentUser.id, currentUser.communityId, previousPrivateKey, previousPublicKey);
-        } else {
-          await removeLocalChatKey(currentUser.id, currentUser.communityId);
-        }
-        throw error;
+      if (verification.status !== 'ACTIVE' || !verification.isCurrentActive) {
+        await storeHistoricalLocalChatKey(
+          currentUser.id,
+          currentUser.communityId,
+          imported.privateKeyJson,
+          imported.publicKeyJson,
+        );
+        setLocalKeyRing(await getLocalChatKeyRing(currentUser.id, currentUser.communityId));
+        setKeyStatus(previousUiState.status === 'ready' ? 'ready' : 'restore-required');
+        setKeyBackupMessage({
+          tone: 'good',
+          text: previousUiState.status === 'ready' ? t.chat.historicalBackupImported : t.chat.historicalBackupImportedActiveRequired,
+        });
+        return;
       }
+      snapshot = await snapshotLocalChatKeyState(currentUser.id, currentUser.communityId);
+      await stageLocalChatKey(currentUser.id, currentUser.communityId, imported.privateKeyJson, imported.publicKeyJson);
+      staged = true;
+      const response = await registerLocalChatKey(currentUser, candidate, 'restore', localDeviceIdentity);
+      registered = true;
+      assertAuthorizedRegistration(response, candidate.publicKey);
+      const localKey = await commitStagedLocalChatKey(currentUser.id, currentUser.communityId, candidate.publicKey);
       setLocalPrivateKey(localKey.privateKey);
       setLocalPublicKey(localKey.publicKey);
       setLocalKeyRing(await getLocalChatKeyRing(currentUser.id, currentUser.communityId));
-      setKeyStatus('preparing');
       setKeyStatus('ready');
       if (activeConversationId) await loadKeysForConversation(activeConversationId);
       setKeyBackupMessage({ tone: 'good', text: t.chat.backupImported });
-    } catch {
-      setKeyStatus(localPrivateKey ? 'ready' : 'failed');
-      setKeyBackupMessage({ tone: 'bad', text: t.chat.backupImportFailed });
+    } catch (error) {
+      if (staged && !registered) await restoreLocalChatKeyState(currentUser.id, currentUser.communityId, snapshot);
+      setLocalPrivateKey(previousUiState.privateKey);
+      setLocalPublicKey(previousUiState.publicKey);
+      setLocalKeyRing(previousUiState.keyRing);
+      setKeyStatus(registered ? 'restore-required' : previousUiState.status);
+      setKeyBackupMessage({ tone: 'bad', text: chatKeyErrorLabel(error, t) });
     } finally {
       setKeyBackupBusy(false);
     }
@@ -2031,8 +2109,8 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
       const encrypted = isGroupConversation(selectedConversation)
         ? await encryptGroupMessagePayload(outboundPlaintext, localPrivateKey, localDeviceKey, groupRecipientKeys)
         : await encryptDirectMessagePayload(outboundPlaintext, localPrivateKey, localDeviceKey, recipientKey);
-      const sent = sendEncryptedMessage(encrypted);
-      if (!sent) throw new Error('Socket unavailable.');
+      const sent = await sendEncryptedMessage(encrypted);
+      if (!sent.ok) throw new ChatSendError(sent.error);
       setMessageText('');
       setSelectedAttachmentFile(null);
       setSelectedAttachmentKind(null);
@@ -2041,8 +2119,8 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
       setAttachmentComposerStatus('sent');
       setReplyTargetId('');
       stopTyping();
-    } catch {
-      setSendError(selectedAttachmentFile ? t.chat.attachmentUploadFailed : t.chat.sendFailed);
+    } catch (error) {
+      setSendError(error instanceof ChatSendError ? chatSocketErrorLabel(error.code, t) : selectedAttachmentFile ? t.chat.attachmentUploadFailed : t.chat.sendFailed);
       if (selectedAttachmentFile) toast.error(t.chat.uploadFailed);
       if (selectedAttachmentFile) setAttachmentComposerStatus('failed');
       if (selectedAttachmentFile) setAttachmentTransferProgress(null);
@@ -7074,9 +7152,49 @@ function messageStatusLabel(message: ChatMessage, conversation: ChatConversation
 
 function chatSocketErrorLabel(code: string, t: ReturnType<typeof useI18n>['t']) {
   if (code === 'conversation_not_joined') return t.chat.conversationNotConnected;
+  if (code === 'message_send_timeout' || code === 'socket_unavailable') return t.chat.sendTimedOut;
   if (code === 'message_edit_rejected') return t.chat.messageEditFailed;
   if (code === 'message_reaction_rejected') return t.chat.reactionSaveFailed;
   return t.chat.sendFailed;
+}
+
+class ChatSendError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = 'ChatSendError';
+  }
+}
+
+function assertAuthorizedRegistration(response: ChatKeyRegistrationResponse, expectedPublicKey: string) {
+  if (response.key.publicKey !== expectedPublicKey || response.key.status !== 'ACTIVE' || response.device.status !== 'ACTIVE' || !response.device.current) {
+    throw new Error('CHAT_KEY_AUTHORIZATION_FAILED');
+  }
+}
+
+function chatKeyErrorLabel(error: unknown, t: ReturnType<typeof useI18n>['t'], fallback = t.chat.backupImportFailed) {
+  const code = chatKeyErrorCode(error);
+  if (code === 'CHAT_DEVICE_LIMIT_REACHED') return t.chat.chatDeviceLimitReached;
+  if (code === 'CHAT_BACKUP_KEY_MISMATCH') return t.chat.chatBackupKeyMismatch;
+  if (code === 'CHAT_KEY_REVOKED') return t.chat.chatKeyRevoked;
+  if (code === 'CHAT_DEVICE_IDENTITY_CONFLICT') return t.chat.chatDeviceIdentityConflict;
+  if (code === 'CHAT_RETIRED_KEY_HISTORY_ONLY') return t.chat.chatRetiredKeyHistoryOnly;
+  if (code === 'CHAT_RESTORE_OR_ROTATION_REQUIRED') return t.chat.chatRestoreOrRotationRequired;
+  if (code === 'CHAT_KEY_ALREADY_REGISTERED') return t.chat.chatKeyAlreadyRegistered;
+  if (code === 'CHAT_KEY_AUTHORIZATION_FAILED') return t.chat.chatKeyAuthorizationFailed;
+  return fallback;
+}
+
+function chatKeyErrorCode(error: unknown) {
+  if (error instanceof ApiRequestError) {
+    try {
+      const body = JSON.parse(error.message) as { message?: unknown };
+      const message = Array.isArray(body.message) ? body.message[0] : body.message;
+      return typeof message === 'string' ? message : '';
+    } catch {
+      return '';
+    }
+  }
+  return error instanceof Error && /^CHAT_[A-Z0-9_]+$/.test(error.message) ? error.message : '';
 }
 
 function formatDate(value: string, locale: string) {

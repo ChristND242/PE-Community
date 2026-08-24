@@ -47,7 +47,7 @@ test('rotation is single-flight, pending-safe, retryable, and uses localized fee
   assert.match(rotation, /identityRotationInFlightRef\.current = false/);
   assert.match(rotation, /setKeyStatus\('restore-required'\)/);
   assert.match(rotation, /toast\.success\(t\.chat\.newIdentityCreated\)/);
-  assert.match(rotation, /toast\.error\(t\.chat\.newIdentityFailed\)/);
+  assert.match(rotation, /toast\.error\(chatKeyErrorLabel\(error, t, t\.chat\.newIdentityFailed\)\)/);
   assert.match(source, /busy \? t\.chat\.creatingNewIdentity : t\.chat\.createNewIdentityConfirmAction/);
 });
 

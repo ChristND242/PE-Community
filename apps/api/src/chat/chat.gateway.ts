@@ -8,7 +8,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { HttpException, Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { AuthService, RequestUser } from '../auth/auth.service';
 import { attachRealtimeTransportDiagnostics, realtimeDiagnostic } from '../realtime-diagnostics';
@@ -34,6 +34,8 @@ type SendMessagePayload = ConversationPayload & {
   senderKeyVersionId?: unknown;
   recipientKeyVersionId?: unknown;
 };
+
+type SendMessageAck = (response: { message?: unknown; error?: string }) => void;
 
 type SeenPayload = ConversationPayload & {
   messageId?: unknown;
@@ -179,13 +181,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('chat:message:send')
-  async sendMessage(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() payload: SendMessagePayload) {
+  async sendMessage(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: SendMessagePayload,
+    @Ack() ack?: SendMessageAck,
+  ) {
     const user = await this.userOrDisconnect(client);
-    if (!user) return;
+    if (!user) {
+      ack?.({ error: 'unauthorized' });
+      return;
+    }
     const conversationId = stringValue(payload?.conversationId);
-    if (!conversationId) return this.safeError(client, 'invalid_payload', 'Conversation is required.');
+    if (!conversationId) {
+      this.safeError(client, 'invalid_payload', 'Conversation is required.');
+      ack?.({ error: 'invalid_payload' });
+      return;
+    }
     if (!client.data.joinedConversationIds?.has(conversationId)) {
-      return this.safeError(client, 'conversation_not_joined', 'Conversation is not connected.', conversationId);
+      this.safeError(client, 'conversation_not_joined', 'Conversation is not connected.', conversationId);
+      ack?.({ error: 'conversation_not_joined' });
+      return;
     }
     try {
       const { message } = await this.chat.createMessage(user, conversationId, {
@@ -197,8 +212,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         recipientKeyVersionId: payload.recipientKeyVersionId,
       });
       this.server.to(conversationRoom(conversationId)).emit('chat:message:new', message);
-    } catch {
+      ack?.({ message });
+    } catch (error) {
+      const code = safeMessageSendErrorCode(error);
       this.safeError(client, 'message_rejected', 'Encrypted message could not be sent.');
+      ack?.({ error: code });
     }
   }
 
@@ -413,6 +431,18 @@ function typingKey(socketId: string, conversationId: string) {
 
 function stringValue(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeMessageSendErrorCode(error: unknown) {
+  if (!(error instanceof HttpException)) return 'message_rejected';
+  const response = error.getResponse();
+  const message = typeof response === 'string'
+    ? response
+    : response && typeof response === 'object' && 'message' in response
+      ? (response as { message?: unknown }).message
+      : undefined;
+  const code = Array.isArray(message) ? message[0] : message;
+  return typeof code === 'string' && /^CHAT_[A-Z0-9_]+$/.test(code) ? code : 'message_rejected';
 }
 
 function cookieValue(header: string | undefined, name: string) {

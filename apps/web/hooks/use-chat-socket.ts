@@ -92,6 +92,15 @@ type ChatEditAck = {
   error?: string;
 };
 
+export type ChatSendResult =
+  | { ok: true; message: ChatRealtimeMessage }
+  | { ok: false; error: string };
+
+type ChatSendAck = {
+  message?: ChatRealtimeMessage;
+  error?: string;
+};
+
 type ChatReactionAck = {
   reaction?: ChatReactionUpdate;
   error?: string;
@@ -409,10 +418,24 @@ export function useChatSocket({
   const sendEncryptedMessage = useCallback((payload: ChatEncryptedSendPayload) => {
     const socket = socketRef.current;
     const activeConversationId = joinedConversationRef.current;
-    if (!socket || !activeConversationId || !socket.connected) return false;
+    if (!socket || !activeConversationId || !socket.connected) return Promise.resolve<ChatSendResult>({ ok: false, error: 'socket_unavailable' });
     setLastError('');
-    socket.emit('chat:message:send', { conversationId: activeConversationId, ...payload });
-    return true;
+    return new Promise<ChatSendResult>((resolve) => {
+      socket.timeout(8000).emit('chat:message:send', { conversationId: activeConversationId, ...payload }, (error: Error | null, response?: ChatSendAck) => {
+        if (error) {
+          setLastError('message_send_timeout');
+          resolve({ ok: false, error: 'message_send_timeout' });
+          return;
+        }
+        if (response?.error || !response?.message) {
+          const code = response?.error ?? 'message_rejected';
+          setLastError(code);
+          resolve({ ok: false, error: code });
+          return;
+        }
+        resolve({ ok: true, message: response.message });
+      });
+    });
   }, []);
 
   const deleteMessageForEveryone = useCallback((messageId: string) => {

@@ -4,6 +4,12 @@ const backupType = 'pe-community-chat-key-backup';
 const backupVersion = 1;
 const backupKdf = 'PBKDF2-SHA256';
 const backupIterations = 210_000;
+export const CHAT_KEY_BACKUP_MAX_FILE_BYTES = 128 * 1024;
+const backupSaltBytes = 16;
+const backupIvBytes = 12;
+const maxEncodedFieldLength = 96 * 1024;
+const maxEncryptedPrivateKeyBytes = 64 * 1024;
+const backupFields = ['version', 'type', 'algorithm', 'kdf', 'iterations', 'salt', 'iv', 'encryptedPrivateKey', 'createdAt'];
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -88,9 +94,12 @@ function deriveBackupEncryptionKey(recoveryPassword: string, salt: Uint8Array) {
 }
 
 function parseBackup(value: unknown): EncryptedChatKeyBackup {
-  if (!value || typeof value !== 'object') throw new Error('Invalid backup.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid backup.');
   const backup = value as Partial<EncryptedChatKeyBackup>;
+  const keys = Object.keys(value);
   if (
+    keys.length !== backupFields.length ||
+    keys.some((key) => !backupFields.includes(key)) ||
     backup.version !== backupVersion ||
     backup.type !== backupType ||
     backup.algorithm !== CHAT_ENCRYPTION_ALGORITHM ||
@@ -99,10 +108,19 @@ function parseBackup(value: unknown): EncryptedChatKeyBackup {
     !isNonEmptyString(backup.salt) ||
     !isNonEmptyString(backup.iv) ||
     !isNonEmptyString(backup.encryptedPrivateKey) ||
-    !isNonEmptyString(backup.createdAt)
+    !isNonEmptyString(backup.createdAt) ||
+    backup.createdAt.length > 64 ||
+    backup.salt.length > maxEncodedFieldLength ||
+    backup.iv.length > maxEncodedFieldLength ||
+    backup.encryptedPrivateKey.length > maxEncodedFieldLength ||
+    !Number.isFinite(Date.parse(backup.createdAt))
   ) {
     throw new Error('Invalid backup.');
   }
+  const salt = base64ToBytes(backup.salt, backupSaltBytes);
+  const iv = base64ToBytes(backup.iv, backupIvBytes);
+  const encryptedPrivateKey = base64ToBytes(backup.encryptedPrivateKey, maxEncryptedPrivateKeyBytes);
+  if (salt.length !== backupSaltBytes || iv.length !== backupIvBytes || encryptedPrivateKey.length < 17) throw new Error('Invalid backup.');
   return backup as EncryptedChatKeyBackup;
 }
 
@@ -122,8 +140,17 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-function base64ToBytes(value: string) {
-  const binary = atob(value);
+function base64ToBytes(value: string, maxBytes = maxEncryptedPrivateKeyBytes) {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0 || value.length > Math.ceil(maxBytes / 3) * 4) {
+    throw new Error('Invalid backup.');
+  }
+  let binary: string;
+  try {
+    binary = atob(value);
+  } catch {
+    throw new Error('Invalid backup.');
+  }
+  if (binary.length > maxBytes) throw new Error('Invalid backup.');
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
