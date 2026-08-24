@@ -9,9 +9,11 @@ English | [Français](README.fr.md)
 
 PE Community is a self-hosted workspace for operating a private community. It brings member administration, events, announcements, task boards, automation, notifications, audit logs, and encrypted participant chat into one bilingual application.
 
-<img width="954" height="473" alt="pe-admin-dashboard-light" src="https://github.com/user-attachments/assets/5a79e70a-3aa6-4810-962f-34efd2e6af8f" />
+<img width="957" height="473" alt="pe-admin-dashboard-light" src="https://github.com/user-attachments/assets/ac2a557a-a14c-4f42-bc94-36d9afa447ea" />
 
-<img width="954" height="473" alt="pe-admin-dashboard-night" src="https://github.com/user-attachments/assets/665e8e8f-fb67-4539-9dfa-abc69269e934" />
+
+<img width="957" height="473" alt="pe-admin-dashboard-light" src="https://github.com/user-attachments/assets/f194a6c7-d528-4abd-9664-0f11b95e8841" />
+
 
 
 
