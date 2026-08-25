@@ -21,6 +21,9 @@ test('task board lifecycle UI keeps execution state visible and confirmed', asyn
   assert.match(automation, /automationStoppedBoardPaused/);
   assert.match(automation, /automationStoppedBoardCompleted/);
   assert.match(automation, /automationStatusStopped/);
+  assert.match(automation, /automationStatusStopped, tone: 'app-status-warning'/);
+  assert.match(automation, /automationStatusDisabled, tone: 'app-status-neutral'/);
+  assert.match(automation, /automationFailed, tone: 'app-status-danger'/);
   assert.match(automation, /border-\[var\(--app-warning-border\)\] bg-\[var\(--app-warning-soft\)\]/);
   assert.match(automation, /text-\[var\(--app-warning-foreground\)\]/);
   assert.match(automation, /dark:border-amber-200\/10 dark:bg-amber-300\/\[0\.035\] dark:text-amber-100\/65/);

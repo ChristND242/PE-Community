@@ -5313,7 +5313,7 @@ function KeyBackupModal({
         <div className="space-y-4 p-5">
           <div className="rounded-xl border border-white/10 bg-white/[0.035] px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/35">{t.chat.secureKeys}</p>
-            <p className={`mt-2 text-sm font-semibold ${keyStatus === 'ready' ? 'text-emerald-100' : keyStatus === 'failed' ? 'text-rose-100' : 'text-amber-100'}`}>{keyStatusLabel(keyStatus, t)}</p>
+            <p className={`mt-2 text-sm font-semibold ${keyStatus === 'ready' ? 'app-text-success' : keyStatus === 'failed' ? 'app-text-danger' : 'app-text-warning'}`}>{keyStatusLabel(keyStatus, t)}</p>
             <p className="mt-2 text-xs leading-5 text-white/45">{t.chat.privateKeysStayOnDevice}</p>
           </div>
 
@@ -5336,12 +5336,12 @@ function KeyBackupModal({
             <div className="space-y-3">
               <label className="block">
                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-white/38">{t.chat.importBackup}</span>
-                <input type="file" accept="application/json,.json" onChange={onFile} disabled={busy} className="mt-2 block w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75 file:mr-3 file:rounded-full file:border-0 file:bg-white/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-white/15 disabled:cursor-not-allowed disabled:opacity-55" />
+                <input type="file" accept="application/json,.json" onChange={onFile} disabled={busy} className="app-file-input mt-2 block w-full rounded-xl border px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-full file:px-3 file:py-1.5 file:text-xs file:font-semibold disabled:cursor-not-allowed disabled:opacity-60" />
               </label>
               {file && <p className="truncate text-xs text-white/45">{file.name}</p>}
               {hasLocalKey && (
-                <label className="flex items-start gap-3 rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-3 text-xs leading-5 text-amber-50">
-                  <input type="checkbox" checked={replaceConfirmed} onChange={(event) => onReplaceConfirmed(event.target.checked)} disabled={busy} className="mt-1" />
+                <label className="app-callout-warning flex items-start gap-3 rounded-xl border px-3 py-3 text-xs leading-5">
+                  <input type="checkbox" checked={replaceConfirmed} onChange={(event) => onReplaceConfirmed(event.target.checked)} disabled={busy} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--app-accent)]" />
                   <span>{t.chat.importWillReplaceKey}</span>
                 </label>
               )}
@@ -7242,9 +7242,9 @@ function realtimeStatusLabel(status: 'connected' | 'reconnecting' | 'offline', h
 }
 
 function realtimeStatusClassName(status: 'connected' | 'reconnecting' | 'offline') {
-  if (status === 'connected') return 'border-emerald-300/15 bg-emerald-300/10 text-emerald-100';
-  if (status === 'reconnecting') return 'border-amber-300/20 bg-amber-300/10 text-amber-100';
-  return 'border-white/10 bg-white/[0.04] text-white/56';
+  if (status === 'connected') return 'app-status-success';
+  if (status === 'reconnecting') return 'app-status-warning';
+  return 'app-status-neutral';
 }
 
 function keyStatusLabel(status: ChatKeySetupState, t: ReturnType<typeof useI18n>['t']) {
@@ -7256,10 +7256,10 @@ function keyStatusLabel(status: ChatKeySetupState, t: ReturnType<typeof useI18n>
 }
 
 function keyStatusClassName(status: ChatKeySetupState) {
-  if (status === 'ready') return 'border-emerald-300/15 bg-emerald-300/10 text-emerald-100';
-  if (status === 'restore-required') return 'border-amber-300/20 bg-amber-300/10 text-amber-100';
-  if (status === 'failed') return 'border-rose-300/20 bg-rose-300/10 text-rose-100';
-  return 'border-amber-300/20 bg-amber-300/10 text-amber-100';
+  if (status === 'ready') return 'app-status-success';
+  if (status === 'restore-required') return 'app-status-warning';
+  if (status === 'failed') return 'app-status-danger';
+  return 'app-status-warning';
 }
 
 function composerPlaceholder(state: { selectedConversation: boolean; keyStatus: ChatKeySetupState; recipientKey: boolean; realtimeReady: boolean }, t: ReturnType<typeof useI18n>['t']) {

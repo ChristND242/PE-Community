@@ -209,10 +209,10 @@ export default function AdminStreakAuditPage() {
 function CommunityStreakBoard({ data, t }: { data: StreakAudit; t: ReturnType<typeof useI18n>['t'] }) {
   const leader = data.board.leader;
   const items = [
-    { key: 'active', title: t.admin.streakActiveToday, value: data.summary.activeToday, caption: t.admin.streakUsersLoggedToday(data.summary.activeToday), Icon: Flame, tone: 'border-orange-300/20 bg-orange-300/10 text-orange-200', valueTone: 'text-orange-100' },
-    { key: 'ranked', title: t.admin.streakRankedUsers, value: data.summary.rankedUsers, caption: t.admin.streakRankedUsersCount(data.summary.rankedUsers), Icon: Users, tone: 'border-cyan-300/20 bg-cyan-300/10 text-cyan-200', valueTone: 'text-cyan-100' },
-    { key: 'leader', title: t.admin.streakCurrentLeader, value: leader ? t.admin.streakDays(leader.currentStreak) : '—', caption: leader?.displayName ?? t.admin.streakNoLeader, Icon: Crown, tone: 'border-amber-300/25 bg-amber-300/10 text-amber-200', valueTone: 'text-amber-100' },
-    { key: 'longest', title: t.admin.streakLongestActive, value: t.admin.streakDays(data.summary.longestActiveStreak), caption: t.admin.streakLongestActiveDescription, Icon: Trophy, tone: 'border-emerald-300/20 bg-emerald-300/10 text-emerald-200', valueTone: 'text-emerald-100' },
+    { key: 'active', title: t.admin.streakActiveToday, value: data.summary.activeToday, caption: t.admin.streakUsersLoggedToday(data.summary.activeToday), Icon: Flame, tone: 'app-status-warning', valueTone: 'app-text-warning' },
+    { key: 'ranked', title: t.admin.streakRankedUsers, value: data.summary.rankedUsers, caption: t.admin.streakRankedUsersCount(data.summary.rankedUsers), Icon: Users, tone: 'app-status-info', valueTone: 'app-text-info' },
+    { key: 'leader', title: t.admin.streakCurrentLeader, value: leader ? t.admin.streakDays(leader.currentStreak) : '—', caption: leader?.displayName ?? t.admin.streakNoLeader, Icon: Crown, tone: 'app-status-warning', valueTone: 'app-text-warning' },
+    { key: 'longest', title: t.admin.streakLongestActive, value: t.admin.streakDays(data.summary.longestActiveStreak), caption: t.admin.streakLongestActiveDescription, Icon: Trophy, tone: 'app-status-success', valueTone: 'app-text-success' },
   ];
   return (
     <section className="relative overflow-hidden rounded-[2rem] border border-emerald-300/15 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.22),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.12),transparent_32%),linear-gradient(135deg,rgba(2,6,23,0.97),rgba(6,78,59,0.42))] shadow-2xl shadow-black/20">
@@ -240,8 +240,8 @@ function CommunityStreakBoard({ data, t }: { data: StreakAudit; t: ReturnType<ty
 function HealthStrip({ data, locale, t }: { data: StreakAudit; locale: string; t: ReturnType<typeof useI18n>['t'] }) {
   const items = [
     { title: t.admin.streakAverage, value: new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(data.summary.averageCurrentStreak), caption: t.admin.streakAverageDescription, Icon: Activity, tone: 'text-cyan-200' },
-    { title: t.admin.streakAtRisk, value: data.summary.atRiskCount, caption: t.admin.streakAtRiskCount(data.summary.atRiskCount), Icon: ShieldAlert, tone: 'text-amber-200' },
-    { title: t.admin.streakResetsRecently, value: data.summary.resetsRecently, caption: t.admin.streakRecentResetCount(data.summary.resetsRecently), Icon: RotateCcw, tone: 'text-rose-200' },
+    { title: t.admin.streakAtRisk, value: data.summary.atRiskCount, caption: t.admin.streakAtRiskCount(data.summary.atRiskCount), Icon: ShieldAlert, tone: 'app-text-warning' },
+    { title: t.admin.streakResetsRecently, value: data.summary.resetsRecently, caption: t.admin.streakRecentResetCount(data.summary.resetsRecently), Icon: RotateCcw, tone: 'app-text-danger' },
   ];
   return (
     <section className="grid overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] shadow-xl shadow-black/10 md:grid-cols-3">
@@ -265,7 +265,7 @@ function AtRiskSection({ rows, locale, t }: { rows: AtRiskRow[]; locale: string;
             <div key={row.userId} className="flex items-center gap-3 px-5 py-4 transition hover:bg-white/[0.025]">
               <ProfilePhoto name={row.displayName} avatarUrl={row.avatarUrl} dicebearStyle={row.dicebearStyle} dicebearSeed={row.dicebearSeed} size="sm" alt={row.displayName} className="h-10 w-10" />
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{row.displayName}</p><p className="mt-1 text-xs text-white/42">{userRoleLabel(t, row.role)} · {formatDayKey(row.lastActiveDay, locale)}</p></div>
-              <span className="shrink-0 text-sm font-semibold text-amber-100">{t.admin.streakDays(row.currentStreak)}</span>
+              <span className="app-text-warning shrink-0 text-sm font-semibold">{t.admin.streakDays(row.currentStreak)}</span>
             </div>
           ))}
         </div>

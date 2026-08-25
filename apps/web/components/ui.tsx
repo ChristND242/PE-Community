@@ -18,8 +18,8 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
 }
 
 export function StatusBadge({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'good' | 'warn' | 'bad' | 'neutral' }) {
-  const tones = { good: 'bg-emerald-400/15 text-emerald-200', warn: 'bg-amber-400/15 text-amber-200', bad: 'bg-rose-400/15 text-rose-200', neutral: 'bg-white/10 text-white/70' };
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase ${tones[tone]}`}>{children}</span>;
+  const tones = { good: 'app-status-success', warn: 'app-status-warning', bad: 'app-status-danger', neutral: 'app-status-neutral' };
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold uppercase ${tones[tone]}`}>{children}</span>;
 }
 
 export function EmptyState({ text }: { text: string }) {
@@ -57,9 +57,9 @@ export function TableEmptyState({ title, description }: { title: string; descrip
 
 export function TableErrorState({ title, retryLabel, onRetry }: { title: string; retryLabel: string; onRetry: () => void }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-rose-300/20 bg-rose-300/10 px-5 py-5 text-sm text-rose-100 sm:flex-row sm:items-center sm:justify-between">
+    <div className="app-callout-danger flex flex-col gap-3 rounded-xl border px-5 py-5 text-sm sm:flex-row sm:items-center sm:justify-between">
       <span>{title}</span>
-      <Button onClick={onRetry} className="bg-rose-200 text-rose-950 hover:bg-rose-100">{retryLabel}</Button>
+      <Button onClick={onRetry} className="bg-[var(--app-error-foreground)] text-[var(--app-dialog)] hover:brightness-110">{retryLabel}</Button>
     </div>
   );
 }

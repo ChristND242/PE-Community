@@ -67,9 +67,23 @@
   --app-warning-soft: rgba(217, 145, 23, 0.13);
   --app-warning-border: rgba(180, 111, 8, 0.34);
   --app-warning-foreground: #744509;
+  --app-warning-subtle-foreground: #80500a;
+  --app-success-soft: rgba(19, 127, 89, 0.11);
+  --app-success-border: rgba(15, 112, 77, 0.3);
+  --app-success-foreground: #0c6545;
+  --app-success-subtle-foreground: #276c51;
   --app-error-soft: rgba(225, 29, 72, 0.08);
   --app-error-border: rgba(190, 24, 70, 0.3);
   --app-error-foreground: #8f1d3d;
+  --app-error-subtle-foreground: #9f2745;
+  --app-info-soft: rgba(14, 116, 144, 0.09);
+  --app-info-border: rgba(14, 116, 144, 0.28);
+  --app-info-foreground: #145f77;
+  --app-info-subtle-foreground: #286b7e;
+  --app-neutral-soft: rgba(42, 67, 55, 0.07);
+  --app-neutral-border: rgba(42, 67, 55, 0.2);
+  --app-neutral-foreground: #405249;
+  --app-neutral-subtle-foreground: #5d6b64;
   --app-input-focus-ring: rgba(19, 127, 89, 0.2);
   --app-input-invalid-ring: rgba(190, 24, 70, 0.16);
   --template-action-background: rgba(248, 250, 247, 0.96);
@@ -138,9 +152,23 @@
   --app-warning-soft: rgba(252, 211, 77, 0.06);
   --app-warning-border: rgba(253, 230, 138, 0.15);
   --app-warning-foreground: rgba(254, 243, 199, 0.75);
+  --app-warning-subtle-foreground: rgba(254, 243, 199, 0.68);
+  --app-success-soft: rgba(94, 210, 156, 0.1);
+  --app-success-border: rgba(110, 231, 183, 0.18);
+  --app-success-foreground: rgba(209, 250, 229, 0.88);
+  --app-success-subtle-foreground: rgba(209, 250, 229, 0.72);
   --app-error-soft: rgba(253, 164, 175, 0.1);
   --app-error-border: rgba(253, 164, 175, 0.15);
   --app-error-foreground: rgba(255, 228, 230, 0.8);
+  --app-error-subtle-foreground: rgba(255, 228, 230, 0.7);
+  --app-info-soft: rgba(125, 211, 252, 0.08);
+  --app-info-border: rgba(125, 211, 252, 0.16);
+  --app-info-foreground: rgba(224, 242, 254, 0.82);
+  --app-info-subtle-foreground: rgba(224, 242, 254, 0.68);
+  --app-neutral-soft: rgba(255, 255, 255, 0.055);
+  --app-neutral-border: rgba(255, 255, 255, 0.11);
+  --app-neutral-foreground: rgba(255, 255, 255, 0.76);
+  --app-neutral-subtle-foreground: rgba(255, 255, 255, 0.58);
   --app-input-focus-ring: rgba(94, 210, 156, 0.12);
   --app-input-invalid-ring: rgba(251, 113, 133, 0.16);
   --template-action-background: linear-gradient(to top, #07100b, rgba(7, 16, 11, 0.95), transparent);
@@ -268,28 +296,41 @@ html:not(.dark) [class*=" bg-[radial-gradient"] {
   background-image: radial-gradient(circle at top right, rgba(22, 138, 97, 0.1), transparent 34rem) !important;
 }
 
-html:not(.dark) .text-emerald-100,
-html:not(.dark) .text-emerald-200,
-html:not(.dark) .text-emerald-300 {
-  color: #126b4c !important;
+html:not(.dark) [class*="text-emerald-100"],
+html:not(.dark) [class*="text-emerald-200"],
+html:not(.dark) [class*="text-emerald-300"],
+html:not(.dark) [class*="text-green-100"],
+html:not(.dark) [class*="text-green-200"],
+html:not(.dark) [class*="text-green-300"] {
+  color: var(--app-success-subtle-foreground) !important;
 }
 
-html:not(.dark) .text-rose-100,
-html:not(.dark) .text-rose-200,
-html:not(.dark) .text-rose-300 {
-  color: #a12645 !important;
+html:not(.dark) [class*="text-rose-100"],
+html:not(.dark) [class*="text-rose-200"],
+html:not(.dark) [class*="text-rose-300"],
+html:not(.dark) [class*="text-red-100"],
+html:not(.dark) [class*="text-red-200"],
+html:not(.dark) [class*="text-red-300"] {
+  color: var(--app-error-subtle-foreground) !important;
 }
 
-html:not(.dark) .text-amber-100,
-html:not(.dark) .text-amber-200,
-html:not(.dark) .text-amber-300 {
-  color: #85530d !important;
+html:not(.dark) [class*="text-amber-50"],
+html:not(.dark) [class*="text-amber-100"],
+html:not(.dark) [class*="text-amber-200"],
+html:not(.dark) [class*="text-amber-300"],
+html:not(.dark) [class*="text-orange-100"],
+html:not(.dark) [class*="text-orange-200"],
+html:not(.dark) [class*="text-orange-300"] {
+  color: var(--app-warning-subtle-foreground) !important;
 }
 
-html:not(.dark) .text-cyan-100,
-html:not(.dark) .text-cyan-200,
-html:not(.dark) .text-sky-200 {
-  color: #15627b !important;
+html:not(.dark) [class*="text-cyan-100"],
+html:not(.dark) [class*="text-cyan-200"],
+html:not(.dark) [class*="text-cyan-300"],
+html:not(.dark) [class*="text-sky-100"],
+html:not(.dark) [class*="text-sky-200"],
+html:not(.dark) [class*="text-sky-300"] {
+  color: var(--app-info-subtle-foreground) !important;
 }
 
 html:not(.dark) [class^="shadow-black"],
@@ -329,6 +370,77 @@ html:not(.dark) select {
   border-color: var(--app-error-border);
   background: var(--app-error-soft);
   color: var(--app-error-foreground);
+}
+
+/* Canonical semantic states keep meaning stable across both appearances. */
+.app-status-success,
+.app-status-warning,
+.app-status-danger,
+.app-status-info,
+.app-status-neutral {
+  border-style: solid;
+  border-width: 1px;
+}
+
+.app-status-success {
+  border-color: var(--app-success-border);
+  background: var(--app-success-soft);
+  color: var(--app-success-foreground);
+}
+
+.app-status-warning,
+.app-callout-warning {
+  border-color: var(--app-warning-border);
+  background: var(--app-warning-soft);
+  color: var(--app-warning-foreground);
+}
+
+.app-status-danger,
+.app-callout-danger {
+  border-color: var(--app-error-border);
+  background: var(--app-error-soft);
+  color: var(--app-error-foreground);
+}
+
+.app-status-info {
+  border-color: var(--app-info-border);
+  background: var(--app-info-soft);
+  color: var(--app-info-foreground);
+}
+
+.app-status-neutral {
+  border-color: var(--app-neutral-border);
+  background: var(--app-neutral-soft);
+  color: var(--app-neutral-foreground);
+}
+
+.app-text-success { color: var(--app-success-subtle-foreground); }
+.app-text-warning { color: var(--app-warning-subtle-foreground); }
+.app-text-danger { color: var(--app-error-subtle-foreground); }
+.app-text-info { color: var(--app-info-subtle-foreground); }
+.app-text-neutral { color: var(--app-neutral-subtle-foreground); }
+
+.app-file-input {
+  border-color: var(--app-border);
+  background: var(--app-input);
+  color: var(--app-control-foreground);
+}
+
+.app-file-input::file-selector-button {
+  border: 1px solid var(--app-border);
+  background: var(--app-panel-muted);
+  color: var(--app-foreground);
+}
+
+.app-file-input:not(:disabled):hover::file-selector-button {
+  border-color: var(--app-success-border);
+  background: var(--app-interactive-hover);
+}
+
+.app-file-input:focus-visible {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 3px var(--app-input-focus-ring);
+  outline: none;
 }
 
 html:not(.dark) .app-authenticated input:not([type="checkbox"]):not([type="radio"]):not(:disabled):not([readonly]):hover,
