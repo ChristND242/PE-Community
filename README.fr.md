@@ -9,10 +9,12 @@
 
 PE Community est un espace de travail auto-hébergé destiné à la gestion d'une communauté privée. Il réunit l'administration des membres, les événements, les annonces, les tableaux de tâches, les automatisations, les notifications, les journaux d'audit et les discussions chiffrées entre participants dans une application bilingue.
 
-<img width="953" height="473" alt="pe-admin-dashboard-light" src="https://github.com/user-attachments/assets/c980f1d9-e610-4c6e-9236-cfc74e0b41b9" />
+<img width="949" height="471" alt="pe-admin-dashboard-light" src="https://github.com/user-attachments/assets/b860345c-353a-461a-b0d7-e5473f44696e" />
 
 
-<img width="949" height="471" alt="pe-admin-dashboard-night" src="https://github.com/user-attachments/assets/2cdd3187-feb2-4da4-a879-c53359411077" />
+
+<img width="949" height="471" alt="pe-admin-dashboard-night" src="https://github.com/user-attachments/assets/d0318dd3-cc88-4c40-b314-6c7af4577914" />
+
 
 
 
