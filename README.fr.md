@@ -53,6 +53,55 @@ flowchart LR
 
 Le monorepo contient également un site Next.js distinct pour la présentation publique et la documentation opérationnelle. Il ne fait pas partie du chemin des requêtes de l'application authentifiée présenté ci-dessus.
 
+## Chat Integré
+
+## Des conversations privées et sécurisées au cœur de la communauté
+
+Discussion est l'espace de communication intégré de PE Community pour la collaboration quotidienne entre membres et équipes. Les participants passent naturellement des conversations individuelles privées aux conversations de groupe, échangent en temps réel des messages et pièces jointes chiffrés, suivent les éléments non lus et organisent les échanges importants sans quitter la plateforme. La sauvegarde chiffrée des clés facilite également la récupération de l'historique pris en charge lors d'un changement de navigateur ou d'appareil.
+
+<img width="1062" height="620" alt="chat-view-fr" src="https://github.com/user-attachments/assets/5f3f3515-6cf1-4b4c-bcef-107d0b75963e" />
+
+
+### Pensé pour les échanges quotidiens
+
+| Fonctionnalité | Ce qu'elle apporte |
+| --- | --- |
+| Conversations individuelles et de groupe | Des échanges privés entre deux personnes et des espaces communs pour les équipes, projets ou groupes de la communauté. |
+| Interaction en temps réel | Messages instantanés, indicateurs de saisie, réactions, mises à jour de livraison et reconnexion automatique dès le retour de la connexion. |
+| Messages et fichiers chiffrés | Chiffrement côté navigateur du texte, des médias, des images et des documents pris en charge avant leur transport et leur stockage habituels. Les conversations individuelles proposent aussi des images à ouverture unique. |
+| Organisation des conversations | Compteurs d'éléments non lus, recherche, filtres Toutes / Non lues / Groupes / Favoris et épinglage local pour un accès rapide. |
+| Présence et activité | Le statut en ligne et la dernière présence connue permettent de savoir plus facilement quand les autres participants sont disponibles. |
+| Récupération sécurisée | Une sauvegarde chiffrée protégée par mot de passe peut restaurer l'historique chiffré concerné sur un autre navigateur ou appareil pris en charge. |
+
+L'espace comprend aussi des actions familières : réponses, réactions, modification des messages, favoris personnels et effacement ou suppression limités à chaque participant. Ces outils facilitent le suivi des conversations actives tout en préservant la confidentialité entre leurs participants.
+
+### Un chiffrement centré sur les participants
+
+PE Community applique un chiffrement de bout en bout côté navigateur au contenu des conversations. Les messages sont chiffrés avant d'entrer dans le transport temps réel ou le stockage serveur habituel, puis les participants concernés les déchiffrent localement dans leur navigateur. Le matériel d'identité privée de discussion reste côté client ; la plateforme traite le contenu chiffré et les informations limitées nécessaires à sa livraison.
+
+Les pièces jointes prises en charge suivent le même principe. Les fichiers sont chiffrés dans le navigateur avant leur envoi, et les informations nécessaires à leur ouverture circulent dans le contenu chiffré de la conversation. Les participants peuvent ainsi partager des médias et des documents sans que des copies ordinaires lisibles soient conservées dans le flux normal des pièces jointes.
+
+```mermaid
+flowchart LR
+    A[Expéditeur] --> B[Chiffrer dans le navigateur]
+    B --> C[Transport et stockage chiffrés]
+    C --> D[Destinataire]
+    D --> E[Déchiffrer dans le navigateur]
+```
+
+> [!NOTE]
+> Les clés privées de discussion restent côté client. Comme pour toute application chiffrée exécutée dans un navigateur, la sécurité de la session du navigateur et du code applicatif qui lui est distribué fait partie du modèle global de confiance.
+
+### Changer d'appareil sans perdre son historique chiffré
+
+Les utilisateurs peuvent exporter une sauvegarde chiffrée de leur identité de discussion depuis les contrôles **Clés sécurisées**. Cette sauvegarde est protégée par un mot de passe de récupération utilisé localement et jamais envoyé à PE Community. Son importation sur un autre navigateur ou appareil pris en charge peut rendre de nouveau lisible l'historique chiffré concerné.
+
+La restauration d'une sauvegarde n'accorde pas automatiquement le droit d'envoyer des messages. Le nouveau navigateur ou appareil doit encore être autorisé pour la messagerie chiffrée active. Les clés conservées pour d'anciennes conversations peuvent continuer à déverrouiller localement le contenu historique sans autoriser la création de nouveaux messages.
+
+### Des échanges en temps réel avec un résultat de livraison clair
+
+`Socket.IO` maintient les conversations actives synchronisées et reconnecte la discussion sélectionnée lorsque la connexion revient. PE Community attend l'accusé de réception du serveur avant de considérer un message chiffré comme correctement envoyé, une expiration du délai, une perte de connexion ou un problème d'autorisation produit ainsi une erreur visible plutôt qu'un échec silencieux.
+
 ## Prérequis
 
 Le mode d'auto-hébergement pris en charge nécessite Docker Engine avec Docker Compose v2. Le développement local depuis les sources nécessite également Node.js 22 et pnpm 11.5.2 par l'intermédiaire de Corepack.
