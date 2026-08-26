@@ -86,7 +86,7 @@ Encrypted chat protects message and attachment content from normal server-side r
 
 ## Documentation
 
-The full English and French product, administration, deployment, backup, security, and troubleshooting guides are maintained in `apps/site` or the official live documentations. 
+The full English and French product, administration, deployment, backup, security, and troubleshooting guides are maintained in `apps/site` or the official [Docs](https://community.ponaekolo.com/docs).
 
 ## Development
 
