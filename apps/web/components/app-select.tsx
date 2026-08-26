@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, ChevronDown } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../lib/utils';
 
@@ -9,6 +9,59 @@ export type SelectOption<T extends string | number> = {
   value: T;
   label: string;
 };
+
+type SelectPositioningRect = Pick<DOMRect, 'bottom' | 'height' | 'left' | 'right' | 'top' | 'width'>;
+
+export type AppSelectContainedPositioning = {
+  boundaryRef: RefObject<HTMLElement | null>;
+  portalRef: RefObject<HTMLElement | null>;
+};
+
+export function resolveSelectMenuPosition({
+  trigger,
+  boundary,
+  portal,
+  viewportWidth,
+  viewportHeight,
+  menuHeight,
+  requestedWidth,
+}: {
+  trigger: SelectPositioningRect;
+  boundary?: SelectPositioningRect;
+  portal?: SelectPositioningRect;
+  viewportWidth: number;
+  viewportHeight: number;
+  menuHeight: number;
+  requestedWidth: number;
+}) {
+  const edgePadding = 8;
+  const sideOffset = 8;
+  const boundaryTop = Math.max(edgePadding, (boundary?.top ?? 0) + edgePadding);
+  const boundaryRight = Math.min(viewportWidth - edgePadding, (boundary?.right ?? viewportWidth) - edgePadding);
+  const boundaryBottom = Math.min(viewportHeight - edgePadding, (boundary?.bottom ?? viewportHeight) - edgePadding);
+  const boundaryLeft = Math.max(edgePadding, (boundary?.left ?? 0) + edgePadding);
+  const spaceBelow = Math.max(0, boundaryBottom - trigger.bottom - sideOffset);
+  const spaceAbove = Math.max(0, trigger.top - boundaryTop - sideOffset);
+  const placement = spaceBelow < menuHeight && spaceAbove > spaceBelow ? 'top' : 'bottom';
+  const availableSpace = placement === 'top' ? spaceAbove : spaceBelow;
+  const renderedHeight = Math.min(menuHeight, availableSpace);
+  const availableWidth = Math.max(0, boundaryRight - boundaryLeft);
+  const width = Math.min(requestedWidth, availableWidth);
+  const viewportLeft = Math.max(boundaryLeft, Math.min(trigger.left, boundaryRight - width));
+  const viewportTop = placement === 'top'
+    ? trigger.top - renderedHeight - sideOffset
+    : trigger.bottom + sideOffset;
+
+  return {
+    placement: placement as 'top' | 'bottom',
+    style: {
+      left: viewportLeft - (portal?.left ?? 0),
+      top: viewportTop - (portal?.top ?? 0),
+      maxHeight: availableSpace,
+      width,
+    },
+  };
+}
 
 export function AppSelect<T extends string | number>({
   value,
@@ -22,6 +75,7 @@ export function AppSelect<T extends string | number>({
   ariaLabel,
   menuWidth,
   wrapOptions = false,
+  containedPositioning,
 }: {
   value: T;
   options: SelectOption<T>[];
@@ -34,10 +88,11 @@ export function AppSelect<T extends string | number>({
   ariaLabel?: string;
   menuWidth?: number;
   wrapOptions?: boolean;
+  containedPositioning?: AppSelectContainedPositioning;
 }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState<'top' | 'bottom'>('bottom');
-  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -63,26 +118,48 @@ export function AppSelect<T extends string | number>({
   }, [open]);
 
   useLayoutEffect(() => {
-    if (!open || !rootRef.current) return;
+    if (!open) return;
     const updatePlacement = () => {
-      const trigger = rootRef.current?.getBoundingClientRect();
-      const menuHeight = menuRef.current?.offsetHeight ?? 288;
+      const trigger = containedPositioning
+        ? triggerRef.current?.getBoundingClientRect()
+        : rootRef.current?.getBoundingClientRect();
+      const menuHeight = containedPositioning
+        ? menuRef.current?.scrollHeight ?? 288
+        : menuRef.current?.offsetHeight ?? 288;
       if (!trigger) return;
-      const spaceBelow = window.innerHeight - trigger.bottom;
-      const spaceAbove = trigger.top;
-      const nextPlacement = spaceBelow < menuHeight + 16 && spaceAbove > spaceBelow ? 'top' : 'bottom';
-      const availableSpace = Math.max(160, (nextPlacement === 'top' ? spaceAbove : spaceBelow) - 16);
-      const resolvedMenuWidth = Math.min(
-        Math.max(trigger.width, menuWidth ?? 160),
-        window.innerWidth - 16,
-      );
-      setPlacement(nextPlacement);
+      if (!containedPositioning) {
+        const spaceBelow = window.innerHeight - trigger.bottom;
+        const spaceAbove = trigger.top;
+        const nextPlacement = spaceBelow < menuHeight + 16 && spaceAbove > spaceBelow ? 'top' : 'bottom';
+        const availableSpace = Math.max(160, (nextPlacement === 'top' ? spaceAbove : spaceBelow) - 16);
+        const resolvedMenuWidth = Math.min(
+          Math.max(trigger.width, menuWidth ?? 160),
+          window.innerWidth - 16,
+        );
+        setPlacement(nextPlacement);
+        setMenuStyle({
+          position: 'fixed',
+          left: Math.max(8, Math.min(trigger.right - resolvedMenuWidth, window.innerWidth - resolvedMenuWidth - 8)),
+          top: nextPlacement === 'top' ? Math.max(8, trigger.top - Math.min(menuHeight, availableSpace) - 8) : Math.min(trigger.bottom + 8, window.innerHeight - Math.min(menuHeight, availableSpace) - 8),
+          maxHeight: availableSpace,
+          width: resolvedMenuWidth,
+        });
+        return;
+      }
+      const portalElement = containedPositioning?.portalRef.current;
+      const resolved = resolveSelectMenuPosition({
+        trigger,
+        boundary: containedPositioning?.boundaryRef.current?.getBoundingClientRect(),
+        portal: portalElement?.getBoundingClientRect(),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        menuHeight,
+        requestedWidth: Math.max(trigger.width, menuWidth ?? 160),
+      });
+      setPlacement(resolved.placement);
       setMenuStyle({
-        position: 'fixed',
-        left: Math.max(8, Math.min(trigger.right - resolvedMenuWidth, window.innerWidth - resolvedMenuWidth - 8)),
-        top: nextPlacement === 'top' ? Math.max(8, trigger.top - Math.min(menuHeight, availableSpace) - 8) : Math.min(trigger.bottom + 8, window.innerHeight - Math.min(menuHeight, availableSpace) - 8),
-        maxHeight: availableSpace,
-        width: resolvedMenuWidth,
+        position: portalElement ? 'absolute' : 'fixed',
+        ...resolved.style,
       });
     };
     updatePlacement();
@@ -92,7 +169,9 @@ export function AppSelect<T extends string | number>({
       window.removeEventListener('resize', updatePlacement);
       window.removeEventListener('scroll', updatePlacement, true);
     };
-  }, [menuWidth, open]);
+  }, [containedPositioning?.boundaryRef, containedPositioning?.portalRef, menuWidth, open]);
+
+  const portalTarget = containedPositioning?.portalRef.current ?? (typeof document === 'undefined' ? null : document.body);
 
   return (
     <div ref={rootRef} className={cn('relative min-w-[10rem]', className)}>
@@ -104,11 +183,15 @@ export function AppSelect<T extends string | number>({
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          setMenuStyle(null);
+          setOpen((current) => !current);
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') setOpen(false);
           if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
+            setMenuStyle(null);
             setOpen(true);
           }
         }}
@@ -117,11 +200,11 @@ export function AppSelect<T extends string | number>({
         <span title={selected?.label} className={cn('truncate', !selected && 'text-[var(--app-muted-foreground)]')}>{selected?.label ?? placeholder ?? options[0]?.label}</span>
         <ChevronDown size={16} className={cn('shrink-0 text-[var(--app-muted-foreground)] transition', open && 'rotate-180 text-accent')} />
       </button>
-      {open && createPortal(
+      {open && portalTarget && createPortal(
         <div
           ref={menuRef}
           role="listbox"
-          style={menuStyle}
+          style={menuStyle ?? { position: containedPositioning?.portalRef.current ? 'absolute' : 'fixed', visibility: 'hidden' }}
           className="z-[100] overflow-y-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-elevated)] p-1 text-[var(--app-foreground)] shadow-2xl shadow-black/25 [scrollbar-gutter:stable]"
           data-placement={placement}
         >
@@ -165,7 +248,7 @@ export function AppSelect<T extends string | number>({
             );
           })}
         </div>
-      , document.body)}
+      , containedPositioning?.portalRef.current ?? document.body)}
     </div>
   );
 }

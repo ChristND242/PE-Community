@@ -13,9 +13,9 @@ import {
   Trash2,
   Workflow,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { AppSelect } from './app-select';
+import { AppSelect, type AppSelectContainedPositioning } from './app-select';
 import { TaskBoardMasterDetailWorkspace } from './task-board-master-detail-workspace';
 import {
   ConfirmDialog,
@@ -126,6 +126,10 @@ export function TaskTemplateManager({
   const [archiveTemplate, setArchiveTemplate] = useState<TaskTemplate | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
+  const desktopEditorBoundaryRef = useRef<HTMLDivElement>(null);
+  const mobileEditorBoundaryRef = useRef<HTMLDivElement>(null);
+  const desktopEditorPortalRef = useRef<HTMLDivElement>(null);
+  const mobileEditorPortalRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setLoadError('');
@@ -487,7 +491,10 @@ export function TaskTemplateManager({
         : selectedTemplate?.name ?? t.admin.selectTaskTemplateRecord;
     const formId = `task-template-${mode}-${selectedTemplateId ?? 'new'}-${mobile ? 'mobile' : 'desktop'}`;
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-black/10">
+      <div
+        ref={mobile ? mobileEditorPortalRef : desktopEditorPortalRef}
+        className="relative flex h-full min-h-0 flex-col overflow-hidden bg-black/10"
+      >
         <header className="flex shrink-0 items-start gap-3 border-b border-white/[0.08] px-4 py-4 sm:px-5">
           {mobile && (
             <button
@@ -521,7 +528,10 @@ export function TaskTemplateManager({
           )}
         </header>
 
-        <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={mobile ? mobileEditorBoundaryRef : desktopEditorBoundaryRef}
+          className="chat-scrollbar min-h-0 flex-1 overflow-y-auto"
+        >
           {mode === 'view' && !selectedTemplate ? (
             <div className="flex h-full min-h-72 flex-col items-center justify-center px-6 text-center">
               <span className="grid h-12 w-12 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-white/30">
@@ -548,6 +558,10 @@ export function TaskTemplateManager({
                 onFormChange={setForm}
                 onUpdateItem={updateItem}
                 onMoveItem={moveItem}
+                containedPositioning={{
+                  boundaryRef: mobile ? mobileEditorBoundaryRef : desktopEditorBoundaryRef,
+                  portalRef: mobile ? mobileEditorPortalRef : desktopEditorPortalRef,
+                }}
                 t={t}
               />
             </form>
@@ -665,6 +679,7 @@ function TemplateFormBody({
   onFormChange,
   onUpdateItem,
   onMoveItem,
+  containedPositioning,
   t,
 }: {
   form: TemplateForm;
@@ -673,6 +688,7 @@ function TemplateFormBody({
   onFormChange: (form: TemplateForm) => void;
   onUpdateItem: (index: number, patch: Partial<TemplateItem>) => void;
   onMoveItem: (index: number, direction: -1 | 1) => void;
+  containedPositioning: AppSelectContainedPositioning;
   t: ReturnType<typeof useI18n>['t'];
 }) {
   return (
@@ -744,7 +760,7 @@ function TemplateFormBody({
               <div className="mt-3 grid min-w-0 gap-3">
                 <Field label={t.admin.eventTaskTitle} value={item.title} error={itemError.title} onChange={(title) => onUpdateItem(index, { title })} />
                 <Field label={t.admin.eventTaskLabel} value={item.label} error={itemError.label} onChange={(label) => onUpdateItem(index, { label })} />
-                <AppSelect value={item.priority} label={t.admin.eventTaskPriority} options={(['LOW', 'MEDIUM', 'HIGH'] as Priority[]).map((priority) => ({ value: priority, label: priorityLabel(priority, t) }))} onChange={(priority) => onUpdateItem(index, { priority })} />
+                <AppSelect value={item.priority} label={t.admin.eventTaskPriority} options={(['LOW', 'MEDIUM', 'HIGH'] as Priority[]).map((priority) => ({ value: priority, label: priorityLabel(priority, t) }))} containedPositioning={containedPositioning} onChange={(priority) => onUpdateItem(index, { priority })} />
                 <Field label={t.admin.dueOffsetDays} hint={t.admin.dueOffsetDaysDescription} type="number" value={item.dueOffsetDays} error={itemError.dueOffsetDays} onChange={(dueOffsetDays) => onUpdateItem(index, { dueOffsetDays })} />
                 <label className="sm:col-span-2">
                   <span className="text-sm text-white/70">{t.admin.eventTaskDescription}</span>
