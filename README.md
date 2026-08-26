@@ -51,6 +51,55 @@ flowchart LR
 
 The monorepo also contains a separate Next.js site for public product and operator documentation. It is not part of the authenticated application request path shown above.
 
+## Integrated chat
+
+## Private, secure conversations built into the community
+
+Discussion is PE Community's integrated communication space for everyday collaboration between members and teams. Participants can move naturally between private one-to-one and group conversations, exchange encrypted messages and attachments in realtime, follow unread activity, and organize important discussions without leaving the platform. Encrypted key backup also helps users recover supported conversation history when moving to another browser or device.
+
+<img width="1064" height="616" alt="chat-preview-en" src="https://github.com/user-attachments/assets/5a3f53a1-5fc3-4acf-a298-5306f4ee87c9" />
+
+
+### Designed for everyday communication
+
+| Capability | What it provides |
+| --- | --- |
+| Direct and group conversations | Private individual discussions and shared spaces for teams, projects, or community groups. |
+| Realtime interaction | Live messages, typing indicators, reactions, delivery updates, and automatic reconnection when connectivity returns. |
+| Encrypted messages and files | Browser-side encryption for text and supported media, images, and documents before normal transport and storage. Direct conversations can also use view-once images. |
+| Conversation organization | Unread counts, conversation search, All / Unread / Groups / Favourites filters, and local pinning for quick access. |
+| Presence and activity | Online status and last-seen information help participants understand when others are available. |
+| Secure recovery | Password-protected encrypted key backups can restore applicable encrypted history on another supported browser or device. |
+
+The workspace also includes familiar message controls such as replies, reactions, editing, personal stars, and participant-scoped clear or delete actions. These tools keep active conversations manageable while preserving the privacy boundary between participants.
+
+### Encryption designed around the participants
+
+PE Community uses browser-side end-to-end encryption for conversation content. Messages are encrypted before they enter normal realtime transport or server storage, and intended participants decrypt them locally in their browsers. Private chat identity material remains client-side; the platform handles encrypted content and the limited information required to deliver it.
+
+Supported attachments follow the same principle. Files are encrypted in the browser before upload, and the information needed to open them travels inside the encrypted conversation content. This allows participants to share media and documents without storing ordinary readable copies as part of the normal attachment flow.
+
+```mermaid
+flowchart LR
+    A[Sender] --> B[Encrypt in browser]
+    B --> C[Encrypted transport and storage]
+    C --> D[Recipient]
+    D --> E[Decrypt in browser]
+```
+
+> [!NOTE]
+> Private chat keys remain on the client side. As with any browser-based encrypted application, the security of the browser session and the application code delivered to it remains part of the overall trust model.
+
+### Move devices without losing encrypted history
+
+Users can export an encrypted backup of their chat identity from the **Secure keys** controls. The backup is protected by a recovery password that is used locally and is not sent to the server. Importing that backup on another supported browser or device can make the applicable encrypted conversation history readable again.
+
+Restoring a backup does not automatically grant permission to send. The new browser or device must still be authorized for active encrypted messaging. Keys retained for older conversations may continue to unlock historical content locally without becoming permission to create new messages.
+
+### Realtime communication with visible delivery results
+
+`Socket.IO` keeps active conversations synchronized and reconnects the selected discussion when connectivity returns. PE Community waits for server acknowledgement before treating an encrypted message as successfully sent, so a timeout, lost connection, or authorization problem appears as a visible error rather than a silent failure.
+
 ## Requirements
 
 The supported self-hosted path requires Docker Engine with Docker Compose v2. Local source development additionally requires Node.js 22 and pnpm 11.5.2 through Corepack.
