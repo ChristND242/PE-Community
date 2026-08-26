@@ -88,7 +88,7 @@ Le chiffrement des discussions protège le contenu des messages et des pièces j
 
 ## Documentation
 
-Les guides complets en anglais et en français concernant le produit, l'administration, le déploiement, les sauvegardes, la sécurité et le dépannage sont maintenus dans `apps/site`, soit le site public.
+Les guides complets en anglais et en français concernant le produit, l'administration, le déploiement, les sauvegardes, la sécurité et le dépannage sont maintenus dans `apps/site`, soit la [Documentation](https://community.ponaekolo.com/docs).
 
 ## Développement
 
