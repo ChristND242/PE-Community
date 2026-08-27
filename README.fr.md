@@ -102,6 +102,66 @@ La restauration d'une sauvegarde n'accorde pas automatiquement le droit d'envoye
 
 `Socket.IO` maintient les conversations actives synchronisées et reconnecte la discussion sélectionnée lorsque la connexion revient. PE Community attend l'accusé de réception du serveur avant de considérer un message chiffré comme correctement envoyé, une expiration du délai, une perte de connexion ou un problème d'autorisation produit ainsi une erreur visible plutôt qu'un échec silencieux.
 
+## Tableau de Tâches
+
+## Organisez le travail de la planification à l’exécution
+
+Les tableaux de tâches de PE Community transforment les opérations de la communauté en travail visible et attribuable. Les administrateurs peuvent préparer un événement, le décomposer en tâches concrètes, désigner les responsables, définir les priorités et les échéances, puis suivre l’avancement dans un espace unique. Les membres voient les tableaux et les tâches qui les concernent, tandis que les autorisations réservent les actions administratives aux bonnes personnes.
+
+Un tableau peut être lié à un événement ou créé comme espace de planification autonome. Les tableaux liés à un événement offrent aujourd’hui le parcours de tâches complet : les tâches restent associées à l’événement et leurs mises à jour sont répercutées en temps réel pour les collaborateurs actifs.
+
+<img width="1064" height="625" alt="tableau-de-taches-preview" src="https://github.com/user-attachments/assets/16a3f75e-3f89-44a6-a5b8-290e42c9b68e" />
+
+
+### Ce que proposent les tableaux de tâches
+
+| Fonctionnalité | Utilité |
+| --- | --- |
+| Vue d’ensemble | État de préparation, progression, avancement des listes, charge de travail, collaboration récente et points d’attention |
+| Cycle des tâches | Colonnes À faire, En cours et Terminé, avec classement et changement de statut |
+| Responsabilités | Plusieurs responsables, visibilité des tâches non attribuées, synthèse de charge et vues adaptées au membre |
+| Détails de planification | Priorité faible, moyenne ou haute, étiquettes, descriptions, échéances, listes de contrôle, commentaires et pièces jointes |
+| Recherche | Recherche, filtres de visibilité, de liaison et de statut, tri et pagination |
+| Cycle du tableau | États actif, en pause et terminé, réouverture et archivage contrôlé |
+| Collaboration | Actualisation des tâches en temps réel et historique des changements significatifs |
+| Localisation | Interface complète en français et en anglais |
+
+### Modèles de tâches réutilisables
+
+Les modèles sont des schémas opérationnels réutilisables, et non de simples listes de titres. Un modèle contient une suite ordonnée d’éléments avec intitulés, consignes, étiquettes, priorités et décalages d’échéance facultatifs. Les administrateurs peuvent maintenir les modèles actifs, réorganiser leurs éléments et archiver ceux qui ne doivent plus être utilisés.
+
+Lorsqu’un modèle actif est appliqué à un événement, PE Community crée les tâches correspondantes. Les décalages relatifs sont calculés à partir de la date de l’événement. Des consignes comme « confirmer le lieu sept jours avant » ou « envoyer le suivi un jour après » deviennent ainsi reproductibles sans reconstruire le plan. Les réunions, ateliers, campagnes et autres événements récurrents gagnent en cohérence.
+
+### Planification liée aux événements
+
+Un tableau lié à un événement conserve le travail opérationnel auprès de l’événement concerné. Les administrateurs peuvent créer et modifier les tâches, choisir un ou plusieurs responsables, définir priorités et dates, réordonner le travail, tenir les listes de contrôle et ajouter commentaires ou pièces jointes. Les membres peuvent consulter les tableaux liés aux événements, repérer leurs responsabilités et l’urgence, puis changer le statut des tâches qui leur sont attribuées.
+
+Les tableaux publics sont visibles par les membres de la communauté. Un tableau autonome privé devient visible lorsqu’un membre y reçoit une tâche, tandis que les tableaux liés à un événement restent accessibles aux participants authentifiés. Les tableaux autonomes et leur cycle de vie sont disponibles ; l’ajout direct de tâches dans un tableau autonome est volontairement reporté dans la version actuelle.
+
+### Automatisation intégrée au tableau
+
+Une règle d’automatisation associe un déclencheur vérifié à une action ciblée. Les règles actuelles peuvent notifier avant une échéance, signaler un retard, relancer une tâche inactive, repérer une tâche sans responsable, avertir qu’une liste reste incomplète à l’approche de l’échéance, escalader un retard après un délai de grâce ou terminer une tâche lorsque sa liste est entièrement cochée.
+
+Les règles peuvent cibler les responsables et, selon la configuration, les administrateurs. La diffusion prend en charge les notifications dans l’application et le courriel facultatif. Les administrateurs peuvent prévisualiser et appliquer des préréglages, valider une configuration, conserver un brouillon, publier les changements, consulter les versions, restaurer une version antérieure, archiver ou réactiver une règle, examiner sa planification, tester les notifications et consulter les exécutions. Les résultats distinguent succès, exécutions ignorées et échecs ; les simulations et tests facilitent les changements prudents.
+
+### Responsabilités, priorités et progression
+
+La vue d’ensemble transforme le détail des tâches en synthèse opérationnelle. Elle met en évidence les retards et échéances proches, les listes incomplètes, les tâches sans responsable, la progression globale, la charge par personne et les commentaires, pièces jointes ou mises à jour récents. Un administrateur peut ainsi passer directement d’un indicateur de préparation à la tâche qui demande une intervention.
+
+Les membres disposent d’une vue ciblée des tableaux attribués ou visibles, avec le nombre de tableaux attribués et publics ainsi que les tâches proches de l’échéance ou en retard. La recherche et les filtres permettent de cibler l’attribution, la visibilité, le lien à un événement, l’état, le risque, la progression ou l’échéance.
+
+```mermaid
+flowchart LR
+    A[Modèle ou tâche manuelle] --> B[Tableau lié à un événement]
+    B --> C[Attribuer et prioriser]
+    C --> D[Suivre tâches et listes]
+    D --> E[Automatisations et notifications]
+    E --> F[Terminer, suspendre ou archiver]
+```
+
+> [!NOTE]
+> L’accès aux tableaux et leur gestion suivent les autorisations de la communauté. L’automatisation complète une planification responsable ; elle ne remplace pas la vérification des responsables, des dates, des livraisons et de l’état du tableau.
+
 ## Prérequis
 
 Le mode d'auto-hébergement pris en charge nécessite Docker Engine avec Docker Compose v2. Le développement local depuis les sources nécessite également Node.js 22 et pnpm 11.5.2 par l'intermédiaire de Corepack.
