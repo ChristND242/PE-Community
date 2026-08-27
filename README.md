@@ -100,6 +100,67 @@ Restoring a backup does not automatically grant permission to send. The new brow
 
 `Socket.IO` keeps active conversations synchronized and reconnects the selected discussion when connectivity returns. PE Community waits for server acknowledgement before treating an encrypted message as successfully sent, so a timeout, lost connection, or authorization problem appears as a visible error rather than a silent failure.
 
+
+## Task Boards
+
+## Organize work from planning to completion
+
+PE Community Task Boards turn community operations into visible, assignable work. Administrators can prepare an event, divide it into practical tasks, assign responsibility, set priorities and due dates, and follow progress from a single workspace. Members see the boards and tasks relevant to them, while permission-aware controls keep planning and administrative actions in the right hands.
+
+Boards can be linked to events or created as standalone planning records. Event-linked boards provide the complete task workflow today: board tasks stay connected to the event, and their updates are reflected in realtime for active collaborators.
+
+<img width="1052" height="617" alt="task-boards-preview" src="https://github.com/user-attachments/assets/5063fdde-2b8b-4732-ad9b-9841688b0f65" />
+
+
+### What Task Boards provide
+
+| Capability | What it provides |
+| --- | --- |
+| Board overview | Readiness, task progress, checklist completion, workload, recent collaboration, and items needing attention |
+| Task workflow | To do, in progress, and done columns with ordering and status movement |
+| Responsibility | Multiple assignees, unassigned-task visibility, workload summaries, and member-specific views |
+| Planning detail | Low, medium, or high priority; labels; descriptions; due dates; checklists; comments; and attachments |
+| Discovery | Search, visibility and linkage filters, status views, sorting, and pagination |
+| Lifecycle | Active, paused, and completed boards, with reopening and controlled archival |
+| Collaboration | Realtime task refreshes plus a recorded activity trail for meaningful task changes |
+| Localization | Complete English and French interface support |
+
+### Reusable task templates
+
+Task templates are reusable operational patterns, not merely saved task names. A template can contain an ordered set of items with titles, instructions, labels, priorities, and optional due-date offsets. Administrators can maintain active templates, reorder their items, and archive templates that should no longer be used.
+
+When an active template is applied to an event, PE Community creates the corresponding event tasks. Relative offsets are calculated from the event date, making patterns such as “confirm the venue seven days before” or “send the follow-up one day after” repeatable without rebuilding the plan each time. This helps communities standardize recurring meetings, workshops, campaigns, and other event operations.
+
+### Event-linked planning
+
+An event-linked board keeps operational work beside the event it supports. Administrators can create and edit tasks, select one or more assignees, set priorities and dates, reorder work, maintain checklists, and use comments or attachments for supporting context. Members can browse event-linked boards, see assignment and urgency, and update the status of tasks assigned to them.
+
+Public boards are visible to community members. Private standalone boards are visible when a member has an assignment, while event-linked boards remain available to authenticated community participants. Standalone board records and lifecycle management are implemented; adding tasks directly to a standalone board is intentionally deferred in the current release.
+
+### Automation built into the board
+
+Automation rules connect a verified trigger to a focused action. Current rule types can notify participants before a due date, notify when work becomes overdue, follow up on stale tasks, flag unassigned work, warn when a checklist remains incomplete near its deadline, escalate overdue work after a grace period, or complete a task when its checklist is finished.
+
+Rules can target assignees and, where configured, administrators. Delivery supports in-app notifications and optional email. Administrators can preview and apply reusable automation presets, validate rule configuration, keep drafts, publish changes, review version history, roll back a version, archive or restore a rule, inspect schedules, test notifications, and review run results. Run history distinguishes successful, skipped, and failed outcomes, while dry runs and test notifications support safer changes.
+
+### Assignment, priority, and progress
+
+The board overview turns task detail into an operational summary. It highlights overdue and due-soon work, incomplete checklists, unassigned tasks, completion progress, assignee workload, and recent comments, attachments, or updates. This lets an administrator move from a high-level readiness signal directly to the task that needs attention.
+
+Members receive a focused view of assigned and visible boards, with counts for assigned boards, public boards, due-soon tasks, and overdue tasks. Search and filters make it practical to narrow the workspace by assignment, visibility, event linkage, task state, risk, progress, or due date.
+
+```mermaid
+flowchart LR
+    A[Template or manual task] --> B[Event-linked task board]
+    B --> C[Assign and prioritize]
+    C --> D[Track tasks and checklists]
+    D --> E[Automation and notifications]
+    E --> F[Complete, pause, or archive]
+```
+
+> [!NOTE]
+> Task Board access and management follow community permissions. Automation complements accountable planning; it does not replace review of assignees, dates, delivery results, or board status.
+
 ## Requirements
 
 The supported self-hosted path requires Docker Engine with Docker Compose v2. Local source development additionally requires Node.js 22 and pnpm 11.5.2 through Corepack.
