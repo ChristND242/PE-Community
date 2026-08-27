@@ -143,6 +143,9 @@ Automation rules connect a verified trigger to a focused action. Current rule ty
 
 Rules can target assignees and, where configured, administrators. Delivery supports in-app notifications and optional email. Administrators can preview and apply reusable automation presets, validate rule configuration, keep drafts, publish changes, review version history, roll back a version, archive or restore a rule, inspect schedules, test notifications, and review run results. Run history distinguishes successful, skipped, and failed outcomes, while dry runs and test notifications support safer changes.
 
+<img width="1064" height="620" alt="automation-preview" src="https://github.com/user-attachments/assets/224159f7-d342-4103-9333-6d7373a661b2" />
+
+
 ### Assignment, priority, and progress
 
 The board overview turns task detail into an operational summary. It highlights overdue and due-soon work, incomplete checklists, unassigned tasks, completion progress, assignee workload, and recent comments, attachments, or updates. This lets an administrator move from a high-level readiness signal directly to the task that needs attention.
