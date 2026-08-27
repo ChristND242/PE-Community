@@ -144,6 +144,9 @@ Une règle d’automatisation associe un déclencheur vérifié à une action ci
 
 Les règles peuvent cibler les responsables et, selon la configuration, les administrateurs. La diffusion prend en charge les notifications dans l’application et le courriel facultatif. Les administrateurs peuvent prévisualiser et appliquer des préréglages, valider une configuration, conserver un brouillon, publier les changements, consulter les versions, restaurer une version antérieure, archiver ou réactiver une règle, examiner sa planification, tester les notifications et consulter les exécutions. Les résultats distinguent succès, exécutions ignorées et échecs ; les simulations et tests facilitent les changements prudents.
 
+<img width="1061" height="619" alt="automatisation-vue" src="https://github.com/user-attachments/assets/2b0a4e56-a9b1-43af-b0e0-255cefaea548" />
+
+
 ### Responsabilités, priorités et progression
 
 La vue d’ensemble transforme le détail des tâches en synthèse opérationnelle. Elle met en évidence les retards et échéances proches, les listes incomplètes, les tâches sans responsable, la progression globale, la charge par personne et les commentaires, pièces jointes ou mises à jour récents. Un administrateur peut ainsi passer directement d’un indicateur de préparation à la tâche qui demande une intervention.
