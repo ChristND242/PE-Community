@@ -193,7 +193,7 @@ On an unconfigured installation, open the application and follow the guided setu
 
 ## Security
 
-Passwords use Argon2id with an application pepper. Sessions use signed HTTP-only cookies with server-side records. The platform also provides MFA, permission checks, audit logging, upload validation, participant-scoped chat access, and browser-side chat encryption.
+Passwords use Argon2id with an application pepper. Sessions use signed HTTP-only cookies with server-side records. The platform also provides MFA, passkeys, permission checks, audit logging, upload validation, participant-scoped chat access, and browser-side chat encryption.
 
 Encrypted chat protects message and attachment content from normal server-side reading, but metadata and endpoint security still matter. Review the public operator security guide and [SECURITY.md](SECURITY.md) before exposing an installation.
 
