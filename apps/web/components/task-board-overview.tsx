@@ -38,6 +38,7 @@ export type TaskBoardOverviewData = {
     avatarUrl?: string | null;
     dicebearStyle?: string | null;
     dicebearSeed?: string | null;
+    role?: string | null;
     totalTasks: number;
     doneTasks: number;
     overdueTasks: number;

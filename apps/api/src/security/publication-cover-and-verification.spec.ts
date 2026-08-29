@@ -23,11 +23,13 @@ test('feed publisher verification is derived from authoritative author mode and 
   assert.equal(feedPublisherVerification(FeedCommentAuthorMode.USER, 'member'), null);
 });
 
-test('comment, group participant, and task collaboration payloads project authoritative workspace roles in their existing queries', async () => {
-  const [communities, chat, collaboration] = await Promise.all([
+test('comment, group participant, task collaboration, and automation recipients project authoritative workspace roles', async () => {
+  const [communities, chat, collaboration, admin, taskOverview] = await Promise.all([
     readFile(new URL('../communities/communities.service.ts', import.meta.url), 'utf8'),
     readFile(new URL('../chat/chat.service.ts', import.meta.url), 'utf8'),
     readFile(new URL('../event-tasks-realtime/event-task-collaboration.service.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../admin/admin.service.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../task-board-overview.ts', import.meta.url), 'utf8'),
   ]);
   assert.match(communities, /role: \{ select: \{ key: true \} \}/);
   assert.match(communities, /verification: feedPublisherVerification\(comment\.authorMode, comment\.user\.memberships\[0\]\?\.role\.key\)/);
@@ -35,6 +37,8 @@ test('comment, group participant, and task collaboration payloads project author
   assert.match(chat, /workspaceRole: membership\?\.role\.key \?\? 'member'/);
   assert.match(collaboration, /role: \{ select: \{ key: true \} \}/);
   assert.match(collaboration, /role: membership\?\.role\?\.key \?\? 'member'/);
+  assert.match(admin, /role: membership\.role\.key,/);
+  assert.match(taskOverview, /role: user\.memberships\?\.\[0\]\?\.role\?\.key \?\? null/);
 });
 
 test('publication covers are optional and external URLs accept only safe HTTP(S) values', () => {

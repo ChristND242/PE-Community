@@ -87,8 +87,8 @@ test('audit list resolves current user avatars in one community-scoped batch wit
       profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } },
     },
   });
-  assert.deepEqual(result.items[0].actor, { id: 'uploaded-user', name: 'Uploaded User', email: 'uploaded@example.test', type: 'USER', avatarUrl: '/media/avatar.webp', dicebearStyle: null, dicebearSeed: null });
-  assert.deepEqual(result.items[1].actor, { id: 'generated-user', name: 'Generated User', email: 'generated@example.test', type: 'USER', avatarUrl: null, dicebearStyle: 'notionists', dicebearSeed: 'generated-seed' });
+  assert.deepEqual(result.items[0].actor, { id: 'uploaded-user', name: 'Uploaded User', email: 'uploaded@example.test', type: 'USER', currentRole: 'MEMBER', avatarUrl: '/media/avatar.webp', dicebearStyle: null, dicebearSeed: null });
+  assert.deepEqual(result.items[1].actor, { id: 'generated-user', name: 'Generated User', email: 'generated@example.test', type: 'USER', currentRole: 'ADMIN', avatarUrl: null, dicebearStyle: 'notionists', dicebearSeed: 'generated-seed' });
   assert.equal(result.items[2].actor.name, 'Former member');
   assert.equal(result.items[2].actor.type, 'USER');
   assert.equal(result.items[3].actor.type, 'WORKER');

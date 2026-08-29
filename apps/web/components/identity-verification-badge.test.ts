@@ -13,6 +13,17 @@ const memberDetailUrl = new URL('../app/dashboard/members/[id]/page.tsx', import
 const adminMemberListUrl = new URL('../app/admin/members/page.tsx', import.meta.url);
 const adminMemberDetailUrl = new URL('../app/admin/members/[id]/page.tsx', import.meta.url);
 const adminAnnouncementUrl = new URL('../app/admin/announcements/[id]/page.tsx', import.meta.url);
+const adminAuditUrl = new URL('../app/admin/audit/logs/page.tsx', import.meta.url);
+const adminEventUrl = new URL('../app/admin/events/[id]/page.tsx', import.meta.url);
+const adminEventTasksUrl = new URL('../app/admin/events/[id]/event-task-board.tsx', import.meta.url);
+const memberEventTasksUrl = new URL('../app/dashboard/events/[id]/event-tasks.tsx', import.meta.url);
+const shellPresentationUrl = new URL('./dashboard-shell-presentation.tsx', import.meta.url);
+const shellUrl = new URL('./shell.tsx', import.meta.url);
+const streaksUrl = new URL('../app/admin/streaks/page.tsx', import.meta.url);
+const taskBoardUrl = new URL('./task-board-kanban-view.tsx', import.meta.url);
+const tooltipUrl = new URL('./ui/tooltip.tsx', import.meta.url);
+const automationCanvasUrl = new URL('./automation-canvas-view.tsx', import.meta.url);
+const automationUrl = new URL('./task-board-automation.tsx', import.meta.url);
 
 test('authoritative roles and publisher classifications map to distinct verification kinds', () => {
   assert.equal(identityVerificationForRole('owner'), 'owner');
@@ -91,4 +102,49 @@ test('conversation rows keep names truncatable beside unread and metadata contro
   assert.match(source, /flex min-w-0 items-center gap-1\.5 text-sm font-semibold/);
   assert.match(source, /<span className="truncate">\{label\}<\/span>/);
   assert.match(source, /shrink-0 items-center justify-center/);
+});
+
+test('shell, audit, streak, RSVP, and task assignee names use authoritative role badges', async () => {
+  const sources = await Promise.all([
+    readFile(shellPresentationUrl, 'utf8'),
+    readFile(shellUrl, 'utf8'),
+    readFile(adminAuditUrl, 'utf8'),
+    readFile(streaksUrl, 'utf8'),
+    readFile(adminEventUrl, 'utf8'),
+    readFile(adminEventTasksUrl, 'utf8'),
+    readFile(memberEventTasksUrl, 'utf8'),
+    readFile(taskBoardUrl, 'utf8'),
+  ]);
+  for (const source of sources) assert.match(source, /IdentityVerificationBadge/);
+  assert.match(sources[0], /identityVerificationForRole\(user\.role\)/);
+  assert.match(sources[1], /identityVerificationForRole\(user\.role\)/);
+  assert.match(sources[2], /identityVerificationForRole\(item\.actor\.currentRole\)/);
+  assert.match(sources[3], /identityVerificationForRole\((?:row|event)\.role\)/);
+  assert.match(sources[4], /identityVerificationForRole\(rsvp\.user\.role\)/);
+  assert.match(sources[5], /identityVerificationForRole\(member\.role\?\.key\)/);
+  assert.match(sources[6], /identityVerificationForRole\(assignee\.role\)/);
+  assert.match(sources[7], /identityVerificationForRole\(member\?\.role\?\.key\)/);
+});
+
+test('shared tooltip content is portaled and positioned against the viewport', async () => {
+  const source = await readFile(tooltipUrl, 'utf8');
+  assert.match(source, /createPortal/);
+  assert.match(source, /document\.body/);
+  assert.match(source, /getBoundingClientRect/);
+  assert.match(source, /className=\{cn\([\s\S]*pointer-events-none fixed/);
+  assert.match(source, /window\.addEventListener\('scroll', updatePosition, true\)/);
+});
+
+test('expanded automation recipients use role-derived badges while avatar stacks remain badge-free', async () => {
+  const [canvas, automation] = await Promise.all([
+    readFile(automationCanvasUrl, 'utf8'),
+    readFile(automationUrl, 'utf8'),
+  ]);
+  assert.match(automation, /role\?: string \| null/);
+  assert.match(canvas, /identityVerificationForRole\(recipient\.role\)/);
+  const collapsedStart = canvas.indexOf('<span className="flex -space-x-1.5">');
+  const collapsedEnd = canvas.indexOf('<ChevronDown', collapsedStart);
+  assert.notEqual(collapsedStart, -1);
+  assert.notEqual(collapsedEnd, -1);
+  assert.doesNotMatch(canvas.slice(collapsedStart, collapsedEnd), /IdentityVerificationBadge/);
 });

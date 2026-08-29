@@ -568,7 +568,7 @@ export class AdminService {
           where: { archivedAt: null },
           include: {
             assignee: { select: { id: true, name: true, email: true } },
-            assignees: { where: { archivedAt: null }, include: { user: { select: { id: true, name: true, email: true, memberships: { where: { communityId }, take: 1, select: { profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } } } } } } },
+            assignees: { where: { archivedAt: null }, include: { user: { select: { id: true, name: true, email: true, memberships: { where: { communityId }, take: 1, select: { role: { select: { key: true } }, profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } } } } } } },
             checklistItems: { where: { archivedAt: null }, select: { isCompleted: true } },
             _count: { select: { comments: { where: { archivedAt: null } }, attachments: { where: { archivedAt: null } }, activities: { where: { createdAt: { gte: recentActivitySince } } } } },
           },
@@ -874,6 +874,7 @@ export class AdminService {
           avatarUrl: membership.profile?.avatarUrl ?? null,
           dicebearStyle: membership.profile?.dicebearStyle ?? null,
           dicebearSeed: membership.profile?.dicebearSeed ?? null,
+          role: membership.role.key,
           source: membership.role.key === 'owner' ? 'OWNER' as const : 'ADMIN' as const,
         })),
       },
@@ -2554,9 +2555,33 @@ export class AdminService {
   }
 
   async eventRsvps(communityId: string, eventId: string) {
-    const event = await this.prisma.event.findFirst({ where: { id: eventId, communityId }, include: { rsvps: { include: { user: { select: { id: true, name: true, email: true } } }, orderBy: { updatedAt: 'desc' } } } });
+    const event = await this.prisma.event.findFirst({
+      where: { id: eventId, communityId },
+      include: {
+        rsvps: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                memberships: { where: { communityId }, take: 1, select: { role: { select: { key: true } } } },
+              },
+            },
+          },
+          orderBy: { updatedAt: 'desc' },
+        },
+      },
+    });
     if (!event) throw new NotFoundException('Event not found.');
-    return { event: adminEventShape(event), rsvps: event.rsvps };
+    const rsvps = event.rsvps.map(({ user, ...rsvp }) => ({
+      ...rsvp,
+      user: { id: user.id, name: user.name, email: user.email, role: user.memberships[0]?.role.key ?? null },
+    }));
+    return {
+      event: adminEventShape({ ...event, rsvps }),
+      rsvps,
+    };
   }
 
   emailEventAttendees(communityId: string, eventId: string, actorUserId: string, input: Record<string, unknown>) {

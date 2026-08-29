@@ -258,7 +258,7 @@ function auditSummary(item: AuditRow, actor?: AuditActor) {
     category: recordedCategory(metadata) ?? categoryForAction(item.action),
     outcome: recordedOutcome(metadata) ?? outcomeForAction(item.action),
     severity: recordedSeverity(metadata) ?? severityForOutcome(recordedOutcome(metadata) ?? outcomeForAction(item.action)),
-    actor: actor ? { id: actor.id, name: actor.name, email: actor.email, type: 'USER', avatarUrl: actor.avatarUrl, dicebearStyle: actor.dicebearStyle, dicebearSeed: actor.dicebearSeed } : systemActor(metadata),
+    actor: actor ? { id: actor.id, name: actor.name, email: actor.email, type: 'USER', currentRole: actor.currentRole, avatarUrl: actor.avatarUrl, dicebearStyle: actor.dicebearStyle, dicebearSeed: actor.dicebearSeed } : systemActor(metadata),
     target: { type: item.targetType, id: item.targetId, label: targetLabel(metadata, item.targetType, item.targetId) },
     createdAt: item.createdAt.toISOString(),
   };

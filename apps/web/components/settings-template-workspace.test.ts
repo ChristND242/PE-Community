@@ -121,8 +121,9 @@ test('view footer uses one generic grouped icon control without changing action 
   assert.match(groupedButton, /action\.destructive/);
   assert.doesNotMatch(groupedButton, /preview|send-test|template|notification/i);
   assert.match(buttonGroup, /inline-flex[\s\S]*rounded-xl[\s\S]*border/);
-  assert.match(tooltip, /group-hover\/tooltip:opacity-100/);
-  assert.match(tooltip, /group-focus-within\/tooltip:opacity-100/);
+  assert.match(tooltip, /createPortal/);
+  assert.match(tooltip, /document\.body/);
+  assert.match(tooltip, /pointer-events-none fixed/);
 });
 
 test('template tokens share a collapsed copy-only component with safe feedback', async () => {

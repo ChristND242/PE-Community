@@ -5,7 +5,7 @@
   "license": "AGPL-3.0",
   "type": "commonjs",
   "scripts": {
-    "predev": "pnpm --filter @pe/shared prepare:dev",
+    "predev": "pnpm --workspace-root db:generate && pnpm --filter @pe/shared prepare:dev",
     "dev": "nest start --watch",
     "build": "pnpm --filter @pe/shared build && nest build",
     "start": "node dist/main.js",

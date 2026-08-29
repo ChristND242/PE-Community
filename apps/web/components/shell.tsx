@@ -19,9 +19,11 @@ import type { AdminNotificationItem } from '../hooks/use-admin-notifications';
 import type { MemberNotificationItem } from '../hooks/use-member-notifications';
 import { LanguageSwitcher, useI18n } from '../lib/i18n';
 import { memberNotificationHref } from '../lib/member-notification-link';
+import { identityVerificationForRole } from '../lib/identity-verification';
 import { PERMISSIONS, hasPermission } from '../lib/permissions';
 import { userRoleLabel } from '../lib/user-role';
 import { ProfilePhoto } from './profile-photo';
+import { IdentityVerificationBadge } from './identity-verification-badge';
 import { ConfirmDialog, Spinner } from './ui';
 import { ThemeToggle } from './theme-toggle';
 import {
@@ -429,7 +431,7 @@ export function AppShell({ children, admin = false }: { children: React.ReactNod
                   <div className="mt-4 flex min-w-0 items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
                     <ProfilePhoto name={user.name} avatarUrl={user.avatarUrl} dicebearStyle={user.dicebearStyle} dicebearSeed={user.dicebearSeed} size="sm" />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+                      <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{user.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(user.role)} size="xs" /></p>
                       <p className="mt-0.5 truncate text-xs text-white/45">{t.common.signedInAs} {user.email}</p>
                       <p className="mt-1 text-xs text-accent/80">{userRoleLabel(t, user.role)}</p>
                     </div>

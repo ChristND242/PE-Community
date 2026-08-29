@@ -6,9 +6,11 @@ import { toast } from 'sonner';
 import { AppSelect } from '../../../components/app-select';
 import { AppShell } from '../../../components/shell';
 import { ProfilePhoto } from '../../../components/profile-photo';
+import { IdentityVerificationBadge } from '../../../components/identity-verification-badge';
 import { Card, DataTablePagination, LoadingButton, StatusBadge, TableEmptyState, TableErrorState, TableSkeleton } from '../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
+import { identityVerificationForRole } from '../../../lib/identity-verification';
 import { userRoleLabel } from '../../../lib/user-role';
 
 type StreakStatus = 'ACTIVE_TODAY' | 'AT_RISK' | 'LOST' | 'NO_STREAK';
@@ -177,7 +179,7 @@ export default function AdminStreakAuditPage() {
                             <td className="px-4 py-4">
                               <div className="flex min-w-0 items-center gap-3">
                                 <ProfilePhoto name={row.displayName} avatarUrl={row.avatarUrl} dicebearStyle={row.dicebearStyle} dicebearSeed={row.dicebearSeed} size="sm" alt={row.displayName} className="h-10 w-10" />
-                                <span className="truncate font-semibold text-white">{row.displayName}</span>
+                                <span className="flex min-w-0 items-center gap-1.5 font-semibold text-white"><span className="truncate">{row.displayName}</span><IdentityVerificationBadge kind={identityVerificationForRole(row.role)} size="xs" /></span>
                               </div>
                             </td>
                             <td className="px-4 py-4 text-white/58">{userRoleLabel(t, row.role)}</td>
@@ -264,7 +266,7 @@ function AtRiskSection({ rows, locale, t }: { rows: AtRiskRow[]; locale: string;
           {rows.map((row) => (
             <div key={row.userId} className="flex items-center gap-3 px-5 py-4 transition hover:bg-white/[0.025]">
               <ProfilePhoto name={row.displayName} avatarUrl={row.avatarUrl} dicebearStyle={row.dicebearStyle} dicebearSeed={row.dicebearSeed} size="sm" alt={row.displayName} className="h-10 w-10" />
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{row.displayName}</p><p className="mt-1 text-xs text-white/42">{userRoleLabel(t, row.role)} · {formatDayKey(row.lastActiveDay, locale)}</p></div>
+              <div className="min-w-0 flex-1"><p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{row.displayName}</span><IdentityVerificationBadge kind={identityVerificationForRole(row.role)} size="xs" /></p><p className="mt-1 text-xs text-white/42">{userRoleLabel(t, row.role)} · {formatDayKey(row.lastActiveDay, locale)}</p></div>
               <span className="app-text-warning shrink-0 text-sm font-semibold">{t.admin.streakDays(row.currentStreak)}</span>
             </div>
           ))}
@@ -285,7 +287,7 @@ function StreakEventsSection({ events, locale, t }: { events: StreakEvent[]; loc
               const bestChanged = event.previousLongestStreak !== event.newLongestStreak;
               return (
                 <div key={event.id} className="grid gap-3 px-5 py-4 transition hover:bg-white/[0.025] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-white">{event.displayName}</p><StatusBadge tone={event.type === 'RESET' ? 'bad' : event.type === 'INCREMENTED' ? 'good' : 'neutral'}>{streakEventLabel(event.type, t)}</StatusBadge></div><p className="mt-1 text-xs text-white/42">{userRoleLabel(t, event.role)} · {formatDayKey(event.loginDate, locale)}</p></div>
+                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{event.displayName}</span><IdentityVerificationBadge kind={identityVerificationForRole(event.role)} size="xs" /></p><StatusBadge tone={event.type === 'RESET' ? 'bad' : event.type === 'INCREMENTED' ? 'good' : 'neutral'}>{streakEventLabel(event.type, t)}</StatusBadge></div><p className="mt-1 text-xs text-white/42">{userRoleLabel(t, event.role)} · {formatDayKey(event.loginDate, locale)}</p></div>
                   <div className="text-left sm:text-right"><p className="text-sm font-semibold text-white">{event.previousCurrentStreak} → {event.newCurrentStreak}</p><p className="mt-1 text-xs text-white/42">{t.admin.streakChange}{bestChanged ? ` · ${t.admin.streakBestChange}: ${event.previousLongestStreak} → ${event.newLongestStreak}` : ''}</p></div>
                 </div>
               );

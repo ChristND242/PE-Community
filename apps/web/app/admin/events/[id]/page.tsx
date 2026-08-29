@@ -6,16 +6,18 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { AppSelect } from '../../../../components/app-select';
+import { IdentityVerificationBadge } from '../../../../components/identity-verification-badge';
 import { AppShell } from '../../../../components/shell';
 import { Card, ConfirmDialog, LoadingButton, StatusBadge, TableEmptyState, TableErrorState, TableSkeleton } from '../../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../../lib/api';
+import { identityVerificationForRole } from '../../../../lib/identity-verification';
 import { statusLabel, useI18n } from '../../../../lib/i18n';
 import { PERMISSIONS, hasPermission } from '../../../../lib/permissions';
 import { formatDate } from '../../../../lib/utils';
 import { EventTaskBoard } from './event-task-board';
 
 type EventItem = { id: string; title: string; description: string; startsAt: string; location: string; onlineUrl?: string | null; capacity?: number | null; rsvpCounts: { going: number; maybe: number; declined: number } };
-type Rsvp = { id: string; status: string; updatedAt: string; user: { name: string; email: string } };
+type Rsvp = { id: string; status: string; updatedAt: string; user: { name: string; email: string; role?: string | null } };
 type RsvpResponse = { event: EventItem; rsvps: Rsvp[] };
 type EmailSettings = { available: boolean };
 type CurrentUser = { role: string; permissions?: string[] };
@@ -137,7 +139,7 @@ export default function AdminEventDetailPage() {
                     <LoadingButton loading={emailing} loadingLabel={t.admin.queueingEmail} disabled={!canEmailAttendees || emailing || (emailSettings ? !emailSettings.available : false)} onClick={emailAttendees} className="w-full">{t.admin.queueEmail}</LoadingButton>
                   </div>
                 </Card>
-                <Card className="rounded-2xl"><h2 className="text-base font-semibold text-white">{t.dashboard.rsvpList}</h2>{rsvps.length ? <div className="mt-4 space-y-3">{rsvps.map((rsvp) => <div key={rsvp.id} className="rounded-xl border border-white/10 bg-black/20 p-3"><p className="font-medium text-white">{rsvp.user.name}</p><p className="mt-1 flex items-center gap-2 text-xs text-white/45"><Mail size={13} />{rsvp.user.email}</p><div className="mt-3"><StatusBadge tone={rsvp.status === 'GOING' ? 'good' : rsvp.status === 'MAYBE' ? 'warn' : 'bad'}>{statusLabel(t, rsvp.status)}</StatusBadge></div></div>)}</div> : <div className="mt-4"><TableEmptyState title={t.common.empty} /></div>}</Card>
+                <Card className="rounded-2xl"><h2 className="text-base font-semibold text-white">{t.dashboard.rsvpList}</h2>{rsvps.length ? <div className="mt-4 space-y-3">{rsvps.map((rsvp) => <div key={rsvp.id} className="rounded-xl border border-white/10 bg-black/20 p-3"><p className="flex items-center gap-1.5 font-medium text-white"><span>{rsvp.user.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(rsvp.user.role)} size="xs" /></p><p className="mt-1 flex items-center gap-2 text-xs text-white/45"><Mail size={13} />{rsvp.user.email}</p><div className="mt-3"><StatusBadge tone={rsvp.status === 'GOING' ? 'good' : rsvp.status === 'MAYBE' ? 'warn' : 'bad'}>{statusLabel(t, rsvp.status)}</StatusBadge></div></div>)}</div> : <div className="mt-4"><TableEmptyState title={t.common.empty} /></div>}</Card>
               </aside>
             </div>
             <EventTaskBoard eventId={id} canManage={canManageEventTasks} canArchive={canArchiveEventTasks} />

@@ -11,10 +11,11 @@ type MemberEventTaskRecord = EventTask & {
     id: string;
     name: string;
     memberships: {
+      role: { key: string };
       profile: { avatarUrl: string | null; dicebearStyle: string | null; dicebearSeed: string | null } | null;
     }[];
   } | null;
-  assignees: Array<{ userId: string; user: { id: string; name: string; memberships: { profile: { avatarUrl: string | null; dicebearStyle: string | null; dicebearSeed: string | null } | null }[] } }>;
+  assignees: Array<{ userId: string; user: { id: string; name: string; memberships: { role: { key: string }; profile: { avatarUrl: string | null; dicebearStyle: string | null; dicebearSeed: string | null } | null }[] } }>;
   checklistItems: { isCompleted: boolean }[];
 };
 
@@ -308,13 +309,14 @@ export class CommunitiesService {
     const events = await this.prisma.event.findMany({
       where: { communityId },
       orderBy: { startsAt: 'asc' },
-      include: { rsvps: true },
+      include: { rsvps: { include: { user: { select: eventAttendeeUserSelect(communityId) } } } },
     });
     return {
       events: events.map((event) => ({
         ...event,
         rsvpCounts: rsvpCounts(event.rsvps),
         myRsvp: event.rsvps.find((rsvp) => rsvp.userId === userId)?.status ?? null,
+        attendees: event.rsvps.filter((rsvp) => rsvp.status === 'GOING').map(eventAttendeeShape),
       })),
     };
   }
@@ -422,13 +424,14 @@ export class CommunitiesService {
   async event(communityId: string, eventId: string, userId: string) {
     const event = await this.prisma.event.findFirst({
       where: { id: eventId, communityId },
-      include: { rsvps: true },
+      include: { rsvps: { include: { user: { select: eventAttendeeUserSelect(communityId) } } } },
     });
     if (!event) throw new NotFoundException('Event not found.');
     return {
       ...event,
       rsvpCounts: rsvpCounts(event.rsvps),
       myRsvp: event.rsvps.find((rsvp) => rsvp.userId === userId)?.status ?? null,
+      attendees: event.rsvps.filter((rsvp) => rsvp.status === 'GOING').map(eventAttendeeShape),
     };
   }
 
@@ -745,6 +748,33 @@ const publicProfileSelect = {
   skills: true,
 };
 
+const eventAttendeeUserSelect = (communityId: string) => ({
+  id: true,
+  name: true,
+  memberships: {
+    where: { communityId },
+    take: 1,
+    select: { profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } },
+  },
+}) as const;
+
+function eventAttendeeShape(rsvp: {
+  user: {
+    id: string;
+    name: string;
+    memberships: Array<{ profile: { avatarUrl: string | null; dicebearStyle: string | null; dicebearSeed: string | null } | null }>;
+  };
+}) {
+  const profile = rsvp.user.memberships[0]?.profile;
+  return {
+    id: rsvp.user.id,
+    name: rsvp.user.name,
+    avatarUrl: profile?.avatarUrl ?? null,
+    dicebearStyle: profile?.dicebearStyle ?? null,
+    dicebearSeed: profile?.dicebearSeed ?? null,
+  };
+}
+
 function rsvpCounts(rsvps: { status: RsvpStatus }[]) {
   return {
     going: rsvps.filter((rsvp) => rsvp.status === 'GOING').length,
@@ -762,21 +792,26 @@ function memberEventTaskInclude(communityId: string) {
         memberships: {
           where: { communityId },
           take: 1,
-          select: { profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } },
+          select: { role: { select: { key: true } }, profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } },
         },
       },
     },
     assignees: {
       where: { archivedAt: null },
       orderBy: { assignedAt: 'asc' },
-      include: { user: { select: { id: true, name: true, memberships: { where: { communityId }, take: 1, select: { profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } } } } } },
+      include: { user: { select: { id: true, name: true, memberships: { where: { communityId }, take: 1, select: { role: { select: { key: true } }, profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } } } } } },
     },
     checklistItems: { where: { archivedAt: null }, select: { isCompleted: true } },
   });
 }
 
 function memberEventTaskShape(task: MemberEventTaskRecord, userId: string) {
-  const assignees = task.assignees.map(({ user }) => ({ id: user.id, name: user.name, ...(user.memberships[0]?.profile ?? {}) }));
+  const assignees = task.assignees.map(({ user }) => ({
+    id: user.id,
+    name: user.name,
+    role: user.memberships[0]?.role.key ?? null,
+    ...(user.memberships[0]?.profile ?? {}),
+  }));
   return {
     id: task.id,
     eventId: task.eventId,

@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useI18n } from '../lib/i18n';
+import { identityVerificationForRole } from '../lib/identity-verification';
+import { IdentityVerificationBadge } from './identity-verification-badge';
 import { ProfilePhoto } from './profile-photo';
 
 export type ShellCurrentUser = {
@@ -74,7 +76,7 @@ export function DashboardShellIdentity({ user }: { user: ShellCurrentUser | null
   return (
     <div className="flex min-w-0 items-center gap-3">
       {user && <ProfilePhoto name={user.name} avatarUrl={user.avatarUrl} dicebearStyle={user.dicebearStyle} dicebearSeed={user.dicebearSeed} size="sm" />}
-      <div className="min-w-0"><p className="truncate text-sm font-medium text-white">{user?.name ?? t.brand.short}</p><p className="truncate text-xs text-white/45">{user ? `${t.common.signedInAs} ${user.email}` : t.common.communityPortal}</p></div>
+      <div className="min-w-0"><p className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-white"><span className="truncate">{user?.name ?? t.brand.short}</span>{user && <IdentityVerificationBadge kind={identityVerificationForRole(user.role)} size="xs" />}</p><p className="truncate text-xs text-white/45">{user ? `${t.common.signedInAs} ${user.email}` : t.common.communityPortal}</p></div>
     </div>
   );
 }

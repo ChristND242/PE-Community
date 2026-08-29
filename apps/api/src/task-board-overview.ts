@@ -11,6 +11,7 @@ type OverviewTask = {
       id: string;
       name: string;
     memberships?: Array<{
+      role?: { key: string } | null;
       profile?: {
         avatarUrl?: string | null;
         dicebearStyle?: string | null;
@@ -90,6 +91,7 @@ export function buildTaskBoardOverview(
       avatarUrl: string | null;
       dicebearStyle: string | null;
       dicebearSeed: string | null;
+      role: string | null;
       totalTasks: number;
       doneTasks: number;
       overdueTasks: number;
@@ -104,6 +106,7 @@ export function buildTaskBoardOverview(
       avatarUrl: profile?.avatarUrl ?? null,
       dicebearStyle: profile?.dicebearStyle ?? null,
       dicebearSeed: profile?.dicebearSeed ?? null,
+      role: user.memberships?.[0]?.role?.key ?? null,
       totalTasks: 0,
       doneTasks: 0,
       overdueTasks: 0,
