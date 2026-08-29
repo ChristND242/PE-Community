@@ -106,6 +106,6 @@ function authService(prisma: object, jwt: object, passwords: object) {
     {} as never,
     passwords as never,
     {} as never,
-    {} as never,
+    { recordBestEffort: async () => null } as never,
   );
 }

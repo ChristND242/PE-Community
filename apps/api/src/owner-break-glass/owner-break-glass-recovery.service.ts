@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { MembershipStatus, Prisma } from '@prisma/client';
 import { AuditLogService } from '../audit/audit-log.service';
 import { EmailService } from '../email/email.service';
+import { realtimeSessionRegistry } from '../auth/realtime-session-registry';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const OWNER_MFA_BREAK_GLASS_ACTION = 'auth.owner_mfa_break_glass_reset';
@@ -84,6 +85,7 @@ export class OwnerBreakGlassRecoveryService {
           revokedRecoveryCodeCount: recoveryCodes.count,
         };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      realtimeSessionRegistry.revokeUser(preview.userId);
     } catch (error) {
       await this.recordFailedAttempt(preview, 'SECURITY_MUTATION_FAILED');
       throw new OwnerBreakGlassRecoveryError('Owner 2FA recovery could not be completed safely. No security state was changed.');

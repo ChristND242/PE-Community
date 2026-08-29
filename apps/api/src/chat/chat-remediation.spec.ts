@@ -18,7 +18,10 @@ function gatewayHarness(createMessage: () => Promise<unknown>) {
   const roomEvents: Array<{ event: string; payload: unknown }> = [];
   const clientEvents: Array<{ event: string; payload: unknown }> = [];
   const chat = { createMessage };
-  const gateway = new ChatGateway({ cookieName: 'session' } as never, chat as never);
+  const gateway = new ChatGateway({
+    cookieName: 'session',
+    revalidateUserSession: async () => user,
+  } as never, chat as never);
   Object.defineProperty(gateway, 'server', {
     value: {
       to: () => ({ emit: (event: string, payload: unknown) => roomEvents.push({ event, payload }) }),

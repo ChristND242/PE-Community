@@ -2,6 +2,7 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -11,6 +12,7 @@ import { Server, Socket } from 'socket.io';
 import { AuthService, RequestUser } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { attachRealtimeTransportDiagnostics, realtimeDiagnostic } from '../realtime-diagnostics';
+import { realtimeSessionRegistry } from '../auth/realtime-session-registry';
 
 export type EventTaskChangeReason = 'created' | 'updated' | 'moved' | 'reordered' | 'archived' | 'member-status-updated' | 'comment-added' | 'comment-archived' | 'attachment-added' | 'attachment-archived' | 'checklist-added' | 'checklist-updated' | 'checklist-toggled' | 'checklist-archived' | 'checklist-reordered';
 
@@ -41,7 +43,7 @@ type EventTaskRoomPayload = {
     credentials: true,
   },
 })
-export class EventTasksRealtimeGateway implements OnGatewayConnection {
+export class EventTasksRealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(EventTasksRealtimeGateway.name);
 
   @WebSocketServer()
@@ -62,6 +64,11 @@ export class EventTasksRealtimeGateway implements OnGatewayConnection {
     client.data.authentication = authentication;
     try {
       client.data.user = await authentication;
+      realtimeSessionRegistry.register(`event-tasks:${client.id}`, {
+        userId: client.data.user.id,
+        sessionId: client.data.user.sessionId,
+        disconnect: () => client.disconnect(true),
+      });
       client.data.joinedEventTaskIds = new Set<string>();
       realtimeDiagnostic(this.logger, 'event-tasks', client, 'namespace-authentication-accepted');
     } catch {
@@ -71,6 +78,10 @@ export class EventTasksRealtimeGateway implements OnGatewayConnection {
       client.emit('event.tasks.error', { code: 'unauthorized' });
       client.disconnect(true);
     }
+  }
+
+  handleDisconnect(client: AuthenticatedSocket) {
+    realtimeSessionRegistry.unregister(`event-tasks:${client.id}`);
   }
 
   @SubscribeMessage('event.tasks.join')
@@ -107,7 +118,16 @@ export class EventTasksRealtimeGateway implements OnGatewayConnection {
 
   private async userOrDisconnect(client: AuthenticatedSocket) {
     const user = client.data.user;
-    if (user) return user;
+    if (user) {
+      try {
+        const refreshed = await this.auth.revalidateUserSession(user);
+        client.data.user = refreshed;
+        return refreshed;
+      } catch {
+        client.data.user = undefined;
+        client.data.authentication = undefined;
+      }
+    }
     try {
       const authenticatedUser = await client.data.authentication;
       if (authenticatedUser) {

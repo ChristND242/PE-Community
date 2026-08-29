@@ -1,17 +1,19 @@
 import { Body, Controller, Delete, Get, HttpCode, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
-import { CookieOptions, Request, Response } from 'express';
+import { Request, Response } from 'express';
 import { RegistrationRateLimitException } from '../registration/registration-submission.service';
-import { AuthService, SESSION_ABSOLUTE_TIMEOUT_MS } from './auth.service';
+import { AuthService } from './auth.service';
+import { auditRequestContext, requestIp, sessionCookieOptions } from './auth-http';
 import { EmailChangeRateLimitException } from './email-change-rate-limit.service';
 import { EmailChangeService } from './email-change.service';
 import { RegisterDto } from './register.dto';
-import { randomUUID } from 'crypto';
+import { StepUpService } from './step-up.service';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly emailChanges: EmailChangeService,
+    private readonly stepUp: StepUpService,
   ) {}
 
   @Post('register')
@@ -53,13 +55,13 @@ export class AuthController {
   }
 
   @Post('login/2fa/reenroll/setup')
-  ownerTwoFactorReenrollmentSetup(@Body() body: { reenrollmentToken?: string }) {
-    return this.auth.startOwnerTwoFactorReenrollment(body.reenrollmentToken);
+  ownerTwoFactorReenrollmentSetup(@Body() body: { reenrollmentToken?: string }, @Req() req: Request) {
+    return this.auth.startOwnerTwoFactorReenrollment(body.reenrollmentToken, auditRequestContext(req));
   }
 
   @Post('login/2fa/reenroll/verify')
-  async ownerTwoFactorReenrollmentVerify(@Body() body: { reenrollmentToken?: string; code?: string }, @Res({ passthrough: true }) res: Response) {
-    const result = await this.auth.completeOwnerTwoFactorReenrollment(body.reenrollmentToken, body.code);
+  async ownerTwoFactorReenrollmentVerify(@Body() body: { reenrollmentToken?: string; code?: string }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const result = await this.auth.completeOwnerTwoFactorReenrollment(body.reenrollmentToken, body.code, auditRequestContext(req));
     res.cookie(this.auth.cookieName, result.jwtToken, sessionCookieOptions());
     return { user: result.user, backupCodes: result.backupCodes, backupCodesRemaining: result.backupCodesRemaining };
   }
@@ -70,13 +72,13 @@ export class AuthController {
   }
 
   @Post('forgot-password')
-  forgotPassword(@Body() body: Record<string, unknown>) {
-    return this.auth.forgotPassword(body);
+  forgotPassword(@Body() body: Record<string, unknown>, @Req() req: Request) {
+    return this.auth.forgotPassword(body, auditRequestContext(req));
   }
 
   @Post('reset-password')
-  resetPassword(@Body() body: Record<string, unknown>) {
-    return this.auth.resetPassword(body);
+  resetPassword(@Body() body: Record<string, unknown>, @Req() req: Request) {
+    return this.auth.resetPassword(body, auditRequestContext(req));
   }
 
   @Post('logout')
@@ -98,13 +100,14 @@ export class AuthController {
 
   @Post('session/activity')
   sessionActivity(@Req() req: Request) {
-    return this.auth.touchSessionActivity(req.cookies?.[this.auth.cookieName]);
+    return this.auth.touchSessionActivity(req.cookies?.[this.auth.cookieName], auditRequestContext(req));
   }
 
   @Post('change-required-password')
   async changeRequiredPassword(@Req() req: Request, @Body() body: Record<string, unknown>) {
     const user = await this.auth.userFromCookie(req.cookies?.[this.auth.cookieName]);
-    return this.auth.changeRequiredPassword(user.id, body);
+    await this.stepUp.requireRecent(user);
+    return this.auth.changeRequiredPassword(user.id, body, user.communityId, auditRequestContext(req));
   }
 
   @Get('email-change/status')
@@ -134,6 +137,7 @@ export class AuthController {
   @Post('email-change/request')
   async requestEmailChange(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: Record<string, unknown>) {
     const user = await this.auth.userFromCookie(req.cookies?.[this.auth.cookieName]);
+    await this.stepUp.requireRecent(user);
     try {
       return await this.emailChanges.request(user.id, user.communityId, body, requestIp(req));
     } catch (error) {
@@ -171,39 +175,15 @@ export class AuthController {
       this.auth.sessionTokenHashFromCookie(cookie),
     ]);
     if (!sessionTokenHash) throw new UnauthorizedException('Authentication required.');
-    return { ...await this.emailChanges.verify(user.id, user.communityId, body.token, sessionTokenHash), role: user.role };
+    return {
+      ...await this.emailChanges.verify(
+        user.id,
+        user.communityId,
+        body.token,
+        sessionTokenHash,
+        auditRequestContext(req),
+      ),
+      role: user.role,
+    };
   }
-}
-
-function requestIp(req: Request) {
-  return req.ip || req.socket.remoteAddress || 'unknown';
-}
-
-function auditRequestContext(req: Request) {
-  const requestId = randomUUID();
-  return {
-    requestId,
-    correlationId: requestId,
-    sourceIp: requestIp(req),
-    userAgent: req.get('user-agent') ?? undefined,
-    route: req.originalUrl.split('?')[0],
-    httpMethod: req.method,
-    service: 'API',
-  };
-}
-
-function sessionCookieOptions(): CookieOptions {
-  return {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: shouldUseSecureCookies(),
-    maxAge: SESSION_ABSOLUTE_TIMEOUT_MS,
-    path: '/',
-  };
-}
-
-function shouldUseSecureCookies() {
-  if (process.env.SESSION_COOKIE_SECURE) return process.env.SESSION_COOKIE_SECURE === 'true';
-  if (process.env.WEB_ORIGIN) return process.env.WEB_ORIGIN.startsWith('https://');
-  return process.env.NODE_ENV === 'production';
 }

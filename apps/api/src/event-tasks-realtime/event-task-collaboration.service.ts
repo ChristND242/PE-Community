@@ -13,7 +13,10 @@ const collaborationUserSelect = (communityId: string) => Prisma.validator<Prisma
   name: true,
   memberships: {
     where: { communityId },
-    select: { profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } },
+    select: {
+      role: { select: { key: true } },
+      profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } },
+    },
     take: 1,
   },
 });
@@ -547,10 +550,12 @@ function checklistItemTitle(rawTitle: unknown) {
 }
 
 function collaborationUserShape(user: any) {
-  const profile = user.memberships?.[0]?.profile;
+  const membership = user.memberships?.[0];
+  const profile = membership?.profile;
   return {
     id: user.id,
     name: user.name,
+    role: membership?.role?.key ?? 'member',
     avatarUrl: profile?.avatarUrl ?? null,
     dicebearStyle: profile?.dicebearStyle ?? null,
     dicebearSeed: profile?.dicebearSeed ?? null,

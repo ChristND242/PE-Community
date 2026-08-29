@@ -1,14 +1,15 @@
 'use client';
 
-import { KeyRound, Mail, ShieldCheck, UserRound } from 'lucide-react';
+import { Fingerprint, KeyRound, Mail, MonitorSmartphone, ShieldCheck, UserRound } from 'lucide-react';
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { ApiRequestError, apiFetch } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { cn } from '../lib/utils';
 import { Card, LoadingButton } from './ui';
+import { isStepUpCancellation, useStepUpAuthentication } from './step-up-authentication-dialog';
 
-export type ProfileAccountTab = 'basic' | 'email' | 'password' | 'two-factor';
+export type ProfileAccountTab = 'basic' | 'email' | 'password' | 'two-factor' | 'passkeys' | 'sessions';
 
 export function ProfileAccountTabs({ activeTab, idPrefix, onChange }: { activeTab: ProfileAccountTab; idPrefix: string; onChange: (tab: ProfileAccountTab) => void }) {
   const { t } = useI18n();
@@ -17,6 +18,8 @@ export function ProfileAccountTabs({ activeTab, idPrefix, onChange }: { activeTa
     { key: 'email' as const, label: t.security.emailAddress, icon: Mail },
     { key: 'password' as const, label: t.common.password, icon: KeyRound },
     { key: 'two-factor' as const, label: t.security.twoFactorAuthentication, icon: ShieldCheck },
+    { key: 'passkeys' as const, label: t.security.passkeys, icon: Fingerprint },
+    { key: 'sessions' as const, label: t.security.sessionsAndActivity, icon: MonitorSmartphone },
   ];
 
   useEffect(() => {
@@ -76,6 +79,7 @@ type EmailChangeStatus = {
 
 export function EmailChangePanel() {
   const { t } = useI18n();
+  const stepUp = useStepUpAuthentication();
   const [status, setStatus] = useState<EmailChangeStatus | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -110,16 +114,17 @@ export function EmailChangePanel() {
     }
     setBusy('request');
     try {
-      await apiFetch('/auth/email-change/request', {
+      await stepUp.run(() => apiFetch('/auth/email-change/request', {
         method: 'POST',
         body: JSON.stringify({ currentPassword, newEmail }),
-      });
+      }));
       await loadStatus();
       setCurrentPassword('');
       setNewEmail('');
       setConfirmEmail('');
       toast.success(t.security.emailChangeRequested);
     } catch (error) {
+      if (isStepUpCancellation(error)) return;
       await loadStatus().catch(() => undefined);
       toast.error(error instanceof ApiRequestError && error.status === 409
         ? t.security.emailUnavailable
@@ -174,6 +179,7 @@ export function EmailChangePanel() {
   const resendAvailable = Boolean(status?.pending && new Date(status.pending.canResendAt).getTime() <= now);
 
   return (
+    <>
     <Card className="min-w-0 overflow-hidden rounded-[1.35rem] border-white/[0.08] bg-white/[0.035] p-0 shadow-[0_24px_80px_rgba(0,0,0,0.22)]">
       <div className="border-b border-white/[0.06] px-5 py-5 md:px-6">
         <h2 className="text-base font-semibold tracking-[-0.02em] text-white md:text-lg">{t.security.changeEmailAddress}</h2>
@@ -259,11 +265,13 @@ export function EmailChangePanel() {
         )}
       </div>
     </Card>
+    {stepUp.dialog}
+    </>
   );
 }
 
 function isProfileAccountTab(value: string | null): value is ProfileAccountTab {
-  return value === 'basic' || value === 'email' || value === 'password' || value === 'two-factor';
+  return value === 'basic' || value === 'email' || value === 'password' || value === 'two-factor' || value === 'passkeys';
 }
 
 function EmailField({ label, value, autoComplete, onChange }: { label: string; value: string; autoComplete: string; onChange: (value: string) => void }) {
@@ -288,6 +296,7 @@ export function ProfileTabPanel({ active, id, labelledBy, children }: { active: 
 
 export function PasswordChangePanel() {
   const { t } = useI18n();
+  const stepUp = useStepUpAuthentication();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -311,15 +320,16 @@ export function PasswordChangePanel() {
 
     setLoading(true);
     try {
-      await apiFetch('/auth/change-required-password', {
+      await stepUp.run(() => apiFetch('/auth/change-required-password', {
         method: 'POST',
         body: JSON.stringify({ currentPassword, newPassword }),
-      });
+      }));
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       toast.success(t.security.passwordUpdated);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.security.passwordUpdateFailed);
     } finally {
       setLoading(false);
@@ -327,6 +337,7 @@ export function PasswordChangePanel() {
   }
 
   return (
+    <>
     <Card className="min-w-0 overflow-hidden rounded-[1.35rem] border-white/[0.08] bg-white/[0.035] p-0 shadow-[0_24px_80px_rgba(0,0,0,0.22)]">
       <div className="border-b border-white/[0.06] px-5 py-5 md:px-6">
         <h2 className="text-base font-semibold tracking-[-0.02em] text-white md:text-lg">{t.security.changePassword}</h2>
@@ -340,6 +351,8 @@ export function PasswordChangePanel() {
         </div>
       </form>
     </Card>
+    {stepUp.dialog}
+    </>
   );
 }
 

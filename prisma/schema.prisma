@@ -26,6 +26,11 @@ enum RsvpStatus {
   DECLINED
 }
 
+enum PublicationCoverSource {
+  UPLOAD
+  EXTERNAL
+}
+
 enum AnnouncementStatus {
   DRAFT
   PUBLISHED
@@ -216,6 +221,8 @@ model User {
   updatedAt            DateTime     @updatedAt
   memberships          Membership[]
   sessions             Session[]
+  securityEvents       SecurityEvent[]
+  passkeyCredentials   PasskeyCredential[]
   rsvps                EventRsvp[]
   assignedEventTasks   EventTask[] @relation("EventTaskAssignee")
   eventTaskAssignments EventTaskAssignee[] @relation("EventTaskAssignedUser")
@@ -266,6 +273,27 @@ model User {
   loginStreakEvents    UserLoginStreakEvent[]
 }
 
+model PasskeyCredential {
+  id             String    @id @default(cuid())
+  userId         String
+  credentialId   String    @unique
+  webauthnUserId String
+  publicKey      Bytes
+  counter        BigInt    @default(0)
+  transports     String[]  @default([])
+  deviceType     String
+  backedUp       Boolean
+  name           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, revokedAt])
+}
+
 model Organization {
   id          String      @id @default(cuid())
   name        String
@@ -307,6 +335,7 @@ model Community {
   notificationTemplates NotificationTemplate[]
   messageTemplates CommunityMessageTemplate[]
   auditLogs      AuditLog[]
+  securityEvents SecurityEvent[]
   roles          Role[]
   chatConversations ChatConversation[]
   chatDevices       ChatDevice[]
@@ -1383,6 +1412,8 @@ model Announcement {
   body        String
   status      AnnouncementStatus @default(DRAFT)
   authorMode  AnnouncementAuthorMode @default(USER)
+  coverUrl    String?
+  coverSource PublicationCoverSource?
   publishedAt DateTime?
   deletedAt   DateTime?
   community   Community @relation(fields: [communityId], references: [id])
@@ -1477,6 +1508,31 @@ model AuditLog {
   @@index([communityId, targetType, targetId])
 }
 
+model SecurityEvent {
+  id                   String    @id @default(cuid())
+  communityId          String
+  userId               String
+  eventType            String
+  result               String    @default("SUCCESS")
+  occurredAt           DateTime  @default(now())
+  ipAddress            String
+  countryCode          String?
+  countryName          String
+  browser              String
+  operatingSystem      String
+  authenticationMethod String?
+  sessionId            String?
+  metadata             Json?
+  dedupeKey            String?   @unique
+  emailQueuedAt        DateTime?
+  community            Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+  @@index([communityId, occurredAt])
+  @@index([userId, eventType, occurredAt])
+}
+
 model EmailCampaign {
   id          String    @id @default(cuid())
   communityId String
@@ -1536,6 +1592,18 @@ model Session {
   expiresAt      DateTime
   lastActivityAt DateTime @default(now())
   idleExpiresAt  DateTime
+  stepUpAuthenticatedAt DateTime?
+  stepUpMethod   String?
+  authenticationMethod String?
+  createdIp      String?
+  createdCountryCode String?
+  createdCountryName String?
+  lastSeenIp     String?
+  lastSeenCountryCode String?
+  lastSeenCountryName String?
+  userAgent      String?
+  browser        String?
+  operatingSystem String?
   createdAt      DateTime @default(now())
   user           User     @relation(fields: [userId], references: [id])
 

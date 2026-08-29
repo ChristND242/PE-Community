@@ -9,6 +9,8 @@ import { EmailChangePanel, PasswordChangePanel, ProfileAccountTabs, ProfileTabPa
 import { ProfilePhoto } from '../../../components/profile-photo';
 import { ProfileSocialLinks } from '../../../components/profile-social-links';
 import { TwoFactorCard } from '../../../components/two-factor-card';
+import { PasskeySettingsCard } from '../../../components/passkey-settings-card';
+import { AccountSecurityActivity } from '../../../components/account-security-activity';
 import { Button, Card, LoadingButton, TableErrorState, TableSkeleton } from '../../../components/ui';
 import { apiFetch, apiUrl } from '../../../lib/api';
 import { DicebearStyleName, dicebearAvatarOptions } from '../../../lib/avatar';
@@ -283,6 +285,12 @@ export function AdminProfileForm() {
       </ProfileTabPanel>
       <ProfileTabPanel active={activeTab === 'two-factor'} id="admin-profile-two-factor-panel" labelledBy="admin-profile-two-factor-tab">
         <TwoFactorCard />
+      </ProfileTabPanel>
+      <ProfileTabPanel active={activeTab === 'passkeys'} id="admin-profile-passkeys-panel" labelledBy="admin-profile-passkeys-tab">
+        <PasskeySettingsCard />
+      </ProfileTabPanel>
+      <ProfileTabPanel active={activeTab === 'sessions'} id="admin-profile-sessions-panel" labelledBy="admin-profile-sessions-tab">
+        <AccountSecurityActivity />
       </ProfileTabPanel>
     </div>
   );

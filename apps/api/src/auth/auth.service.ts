@@ -23,6 +23,9 @@ import { LoginStreakService } from './login-streak.service';
 import { profileLinkDtoSelect, safeProfileLinkResponses } from '../profile-links/profile-links.service';
 import { RegisterDto } from './register.dto';
 import { AuditLogService, AuditRequestContext } from '../audit/audit-log.service';
+import { SecurityActivityService } from './security-activity.service';
+import { PasskeyChallengeService } from './passkey-challenge.service';
+import { realtimeSessionRegistry } from './realtime-session-registry';
 
 export type RequestUser = {
   id: string;
@@ -61,6 +64,7 @@ export type SessionActivityStatus = {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private invalidPasswordHash?: Promise<string>;
   cookieName = process.env.SESSION_COOKIE_NAME ?? 'pe_session';
 
   constructor(
@@ -70,7 +74,9 @@ export class AuthService {
     private readonly loginStreaks: LoginStreakService,
     private readonly passwords: PasswordService,
     private readonly registrations: RegistrationSubmissionService,
+    private readonly securityActivity: SecurityActivityService,
     @Optional() private readonly auditLogs?: AuditLogService,
+    @Optional() private readonly authenticationLimits?: PasskeyChallengeService,
   ) {}
 
   async register(input: RegisterDto, ipAddress: string) {
@@ -99,11 +105,16 @@ export class AuthService {
   }
 
   async login(email: string, password: string, requestContext?: AuditRequestContext) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+    const normalizedEmail = stringValue(email)?.toLowerCase() ?? '';
+    const candidatePassword = typeof password === 'string' ? password : '';
+    await this.enforceAuthenticationLimits('password-login', normalizedEmail, requestContext?.sourceIp, 10, 5 * 60);
+    const user = normalizedEmail ? await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
       include: { memberships: { include: { role: true, profile: true }, where: { status: MembershipStatus.ACTIVE } } },
-    });
-    const passwordResult = user ? await this.passwords.verify(user.passwordHash, password) : null;
+    }) : null;
+    const passwordResult = user
+      ? await this.passwords.verify(user.passwordHash, candidatePassword)
+      : await this.verifyUnknownAccountPassword(candidatePassword);
     if (!user || !passwordResult?.valid || user.memberships.length === 0) {
       const membership = user?.memberships[0];
       if (user && membership) await this.auditLogs?.recordBestEffort({
@@ -118,6 +129,12 @@ export class AuthService {
         targetId: user.id,
         reason: 'INVALID_CREDENTIALS',
         requestContext,
+      });
+      if (user && membership) await this.securityActivity.recordFailedLogin({
+        communityId: membership.communityId,
+        userId: user.id,
+        context: requestContext,
+        authenticationMethod: 'PASSWORD',
       });
       throw new UnauthorizedException('Invalid credentials or inactive membership.');
     }
@@ -138,7 +155,7 @@ export class AuthService {
       const challengeToken = await this.jwt.signAsync({ purpose: '2fa-login', sub: user.id, communityId: membership.communityId }, { expiresIn: '5m' });
       return { twoFactorRequired: true, challengeToken, user: { email: user.email } };
     }
-    const response = await this.createSessionResponse(user.id);
+    const response = await this.createSessionResponse(user.id, requestContext, 'PASSWORD');
     await this.auditLogs?.recordBestEffort({
       communityId: membership.communityId,
       actorUserId: user.id,
@@ -166,9 +183,10 @@ export class AuthService {
     return this.email.passwordResetAvailable();
   }
 
-  async forgotPassword(input: Record<string, unknown>) {
+  async forgotPassword(input: Record<string, unknown>, requestContext?: AuditRequestContext) {
     const email = stringValue(input.email)?.toLowerCase();
     if (!email) return { ok: true };
+    await this.enforceAuthenticationLimits('forgot-password', email, requestContext?.sourceIp, 5, 15 * 60);
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: { memberships: { where: { status: MembershipStatus.ACTIVE }, include: { community: true } } },
@@ -192,10 +210,11 @@ export class AuthService {
     return { ok: true };
   }
 
-  async resetPassword(input: Record<string, unknown>) {
+  async resetPassword(input: Record<string, unknown>, requestContext?: AuditRequestContext) {
     const token = stringValue(input.token);
     const newPassword = stringValue(input.newPassword);
     if (!token || !newPassword || newPassword.length < 8) throw new BadRequestException('Invalid or expired reset link.');
+    await this.enforceAuthenticationLimits('reset-password', token, requestContext?.sourceIp, 10, 15 * 60);
     const reset = await this.prisma.passwordResetToken.findUnique({ where: { tokenHash: hashToken(token) }, include: { user: { include: { memberships: { where: { status: MembershipStatus.ACTIVE } } } } } });
     if (!reset || reset.usedAt || reset.expiresAt < new Date()) throw new BadRequestException('Invalid or expired reset link.');
     const passwordHash = await this.passwords.hash(newPassword);
@@ -215,12 +234,14 @@ export class AuthService {
         data: { communityId, actorUserId: reset.userId, action: 'auth.password_reset.completed', targetType: 'User', targetId: reset.userId, metadata: {} },
       });
     });
+    realtimeSessionRegistry.revokeUser(reset.userId);
     return { ok: true };
   }
 
   async completeTwoFactorLogin(challengeToken: string | undefined, code: string | undefined, requestContext?: AuditRequestContext) {
     const token = stringValue(challengeToken);
     if (!token) throw new UnauthorizedException('Authentication code is required.');
+    await this.enforceAuthenticationLimits('totp-login', token, requestContext?.sourceIp, 8, 5 * 60);
     let payload: { purpose?: string; sub?: string; communityId?: string };
     try {
       payload = await this.jwt.verifyAsync(token);
@@ -237,18 +258,26 @@ export class AuthService {
     const backupOk = totpOk ? false : await this.consumeBackupCode(user.id, code);
     if (!totpOk && !backupOk) {
       await this.auditLogs?.recordBestEffort({ communityId: payload.communityId, actorUserId: user.id, actorRole: user.memberships[0].role.key, category: 'AUTHENTICATION', action: 'auth.login.failed', outcome: 'FAILURE', severity: 'WARNING', targetType: 'User', targetId: user.id, reason: 'INVALID_MFA_CODE', requestContext });
+      await this.securityActivity.recordFailedLogin({ communityId: payload.communityId, userId: user.id, context: requestContext, authenticationMethod: 'TOTP' });
       throw new UnauthorizedException('Invalid authentication or backup code.');
     }
-    const response = await this.createSessionResponse(user.id);
+    const response = await this.createSessionResponse(user.id, requestContext, backupOk ? 'BACKUP_CODE' : 'TOTP');
     await this.auditLogs?.recordBestEffort({ communityId: payload.communityId, actorUserId: user.id, actorRole: user.memberships[0].role.key, category: 'AUTHENTICATION', action: 'auth.login.succeeded', targetType: 'User', targetId: user.id, requestContext, metadata: { mode: backupOk ? 'BACKUP_CODE' : 'TOTP' } });
     return response;
+  }
+
+  async createPasskeySession(userId: string, requestContext?: AuditRequestContext) {
+    return this.createSessionResponse(userId, requestContext, 'PASSKEY');
   }
 
   async logout(cookie?: string) {
     if (!cookie) return { ok: true };
     const sid = await this.sessionIdFromCookie(cookie);
     if (sid) {
-      await this.prisma.session.deleteMany({ where: { tokenHash: createHash('sha256').update(sid).digest('hex') } });
+      const tokenHash = createHash('sha256').update(sid).digest('hex');
+      const session = await this.prisma.session.findUnique({ where: { tokenHash }, select: { id: true } });
+      await this.prisma.session.deleteMany({ where: { tokenHash } });
+      if (session) realtimeSessionRegistry.revokeSession(session.id);
     }
     return { ok: true };
   }
@@ -261,7 +290,7 @@ export class AuthService {
     return sessionActivityStatus(session!);
   }
 
-  async touchSessionActivity(cookie?: string): Promise<SessionActivityStatus> {
+  async touchSessionActivity(cookie?: string, requestContext?: AuditRequestContext): Promise<SessionActivityStatus> {
     const tokenHash = await this.sessionTokenHashFromCookie(cookie);
     if (!tokenHash) throw new UnauthorizedException('Authentication required.');
     const session = await this.prisma.session.findUnique({ where: { tokenHash } });
@@ -278,7 +307,16 @@ export class AuthService {
         expiresAt: { gt: now },
         idleExpiresAt: { gt: now },
       },
-      data: { lastActivityAt: now, idleExpiresAt },
+      data: {
+        lastActivityAt: now,
+        idleExpiresAt,
+        lastSeenIp: requestContext?.sourceIp,
+        lastSeenCountryCode: requestContext?.countryCode,
+        lastSeenCountryName: requestContext?.countryName,
+        userAgent: requestContext?.userAgent,
+        browser: requestContext?.browser,
+        operatingSystem: requestContext?.operatingSystem,
+      },
     });
     if (updated.count !== 1) throw new UnauthorizedException('Session expired.');
     return sessionActivityStatus({ ...session!, lastActivityAt: now, idleExpiresAt });
@@ -297,6 +335,20 @@ export class AuthService {
       where: { tokenHash },
       include: { user: { include: { memberships: { include: { role: true, profile: true }, where: { status: 'ACTIVE' } } } } },
     });
+    return this.requestUserFromSession(session);
+  }
+
+  async revalidateUserSession(user: RequestUser): Promise<RequestUser> {
+    const session = await this.prisma.session.findFirst({
+      where: { id: user.sessionId, userId: user.id },
+      include: { user: { include: { memberships: { include: { role: true, profile: true }, where: { status: 'ACTIVE' } } } } },
+    });
+    return this.requestUserFromSession(session);
+  }
+
+  private async requestUserFromSession(session: Prisma.SessionGetPayload<{
+    include: { user: { include: { memberships: { include: { role: true; profile: true }; where: { status: 'ACTIVE' } } } } };
+  }> | null): Promise<RequestUser> {
     const now = new Date();
     if (!session || session.expiresAt <= now || session.idleExpiresAt <= now || session.user.memberships.length === 0) {
       if (session) await this.prisma.session.deleteMany({ where: { id: session.id } });
@@ -322,6 +374,21 @@ export class AuthService {
     };
   }
 
+  private async enforceAuthenticationLimits(
+    scope: string,
+    identifier: string,
+    sourceIp: string | undefined,
+    identifierLimit: number,
+    windowSeconds: number,
+  ) {
+    if (!this.authenticationLimits) return;
+    const ip = sourceIp || 'Unknown';
+    await Promise.all([
+      this.authenticationLimits.enforceAuthenticationRateLimit(`${scope}:source`, ip, identifierLimit * 3, windowSeconds),
+      this.authenticationLimits.enforceAuthenticationRateLimit(`${scope}:identifier`, `${identifier.toLowerCase()}:${ip}`, identifierLimit, windowSeconds),
+    ]);
+  }
+
   async twoFactorStatus(userId: string, communityId: string) {
     const [settings, user, backupCodesRemaining] = await Promise.all([
       this.communitySettings(communityId),
@@ -339,7 +406,13 @@ export class AuthService {
   async setupTwoFactor(userId: string, communityId: string) {
     const settings = await this.communitySettings(communityId);
     if (!settings.twoFactorEnabled) throw new BadRequestException('Two-factor authentication is not enabled for this community.');
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { email: true, twoFactorEnabled: true },
+    });
+    if (user.twoFactorEnabled) {
+      throw new BadRequestException('Two-factor authentication is already enabled. Disable it before starting a new enrollment.');
+    }
     const secret = generateSecret();
     const otpauthUrl = generateURI({ issuer: 'PE Community Management', label: user.email, secret });
     const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl, { margin: 1, width: 220 });
@@ -350,19 +423,26 @@ export class AuthService {
     return { otpauthUrl, qrCodeDataUrl, setupKey: secret };
   }
 
-  async verifyTwoFactorSetup(userId: string, code: string | undefined) {
+  async verifyTwoFactorSetup(userId: string, code: string | undefined, communityId?: string, requestContext?: AuditRequestContext) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { twoFactorSecret: true } });
     if (!user.twoFactorSecret || !verifyTotp(user.twoFactorSecret, code)) throw new BadRequestException('Invalid authentication code.');
-    const updated = await this.prisma.user.update({
+    const confirmedAt = new Date();
+    const confirmed = await this.prisma.user.updateMany({
+      where: { id: userId, twoFactorSecret: user.twoFactorSecret, twoFactorEnabled: false },
+      data: { twoFactorEnabled: true, twoFactorConfirmedAt: confirmedAt, twoFactorReenrollmentRequired: false },
+    });
+    if (confirmed.count !== 1) throw new BadRequestException('Two-factor setup changed or expired. Please start again.');
+    const updated = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      data: { twoFactorEnabled: true, twoFactorConfirmedAt: new Date(), twoFactorReenrollmentRequired: false },
       select: { twoFactorEnabled: true, twoFactorConfirmedAt: true },
     });
     const backupCodes = await this.replaceBackupCodes(userId);
+    if (communityId) await this.securityActivity.recordBestEffort({ communityId, userId, eventType: 'TOTP_ENABLED', context: requestContext, notify: true });
     return { enabled: updated.twoFactorEnabled, confirmedAt: updated.twoFactorConfirmedAt, backupCodes, backupCodesRemaining: backupCodes.length };
   }
 
-  async startOwnerTwoFactorReenrollment(reenrollmentToken: string | undefined) {
+  async startOwnerTwoFactorReenrollment(reenrollmentToken: string | undefined, requestContext?: AuditRequestContext) {
+    await this.enforceAuthenticationLimits('owner-totp-reenrollment', reenrollmentToken ?? '', requestContext?.sourceIp, 8, 5 * 60);
     const owner = await this.ownerReenrollmentChallenge(reenrollmentToken);
     const secret = generateSecret();
     const otpauthUrl = generateURI({ issuer: 'PE Community Management', label: owner.email, secret });
@@ -375,7 +455,8 @@ export class AuthService {
     return { otpauthUrl, qrCodeDataUrl, setupKey: secret };
   }
 
-  async completeOwnerTwoFactorReenrollment(reenrollmentToken: string | undefined, code: string | undefined) {
+  async completeOwnerTwoFactorReenrollment(reenrollmentToken: string | undefined, code: string | undefined, requestContext?: AuditRequestContext) {
+    await this.enforceAuthenticationLimits('owner-totp-reenrollment', reenrollmentToken ?? '', requestContext?.sourceIp, 8, 5 * 60);
     const owner = await this.ownerReenrollmentChallenge(reenrollmentToken);
     if (!owner.twoFactorSecret || !verifyTotp(owner.twoFactorSecret, code)) throw new BadRequestException('Invalid authentication code.');
     const backupCodes = generateBackupCodes();
@@ -400,11 +481,12 @@ export class AuthService {
         },
       });
     });
-    const session = await this.createSessionResponse(owner.id);
+    await this.securityActivity.recordBestEffort({ communityId: owner.communityId, userId: owner.id, eventType: 'TOTP_REENROLLED', context: requestContext, notify: true });
+    const session = await this.createSessionResponse(owner.id, requestContext, 'TOTP');
     return { ...session, backupCodes, backupCodesRemaining: backupCodes.length };
   }
 
-  async disableTwoFactor(userId: string, input: Record<string, unknown>) {
+  async disableTwoFactor(userId: string, input: Record<string, unknown>, communityId?: string, requestContext?: AuditRequestContext) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordHash: true, twoFactorSecret: true, twoFactorEnabled: true } });
     const password = stringValue(input.password);
     const code = stringValue(input.code);
@@ -416,10 +498,11 @@ export class AuthService {
       data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorConfirmedAt: null },
     });
     await this.prisma.userTwoFactorBackupCode.deleteMany({ where: { userId } });
+    if (communityId) await this.securityActivity.recordBestEffort({ communityId, userId, eventType: 'TOTP_DISABLED', context: requestContext, notify: true });
     return { enabled: false, confirmedAt: null };
   }
 
-  async regenerateBackupCodes(userId: string, communityId: string, input: Record<string, unknown>) {
+  async regenerateBackupCodes(userId: string, communityId: string, input: Record<string, unknown>, requestContext?: AuditRequestContext) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordHash: true, twoFactorSecret: true, twoFactorEnabled: true } });
     if (!user.twoFactorEnabled || !user.twoFactorSecret) throw new BadRequestException('Two-factor authentication is not enabled.');
     const password = stringValue(input.password);
@@ -438,10 +521,11 @@ export class AuthService {
         metadata: { codeCount: backupCodes.length },
       },
     });
+    await this.securityActivity.recordBestEffort({ communityId, userId, eventType: 'BACKUP_CODES_REGENERATED', context: requestContext, notify: true });
     return { backupCodes, backupCodesRemaining: backupCodes.length };
   }
 
-  async changeRequiredPassword(userId: string, input: Record<string, unknown>) {
+  async changeRequiredPassword(userId: string, input: Record<string, unknown>, communityId?: string, requestContext?: AuditRequestContext) {
     const currentPassword = stringValue(input.currentPassword);
     const newPassword = stringValue(input.newPassword);
     if (!currentPassword || !newPassword || newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters.');
@@ -458,6 +542,7 @@ export class AuthService {
         data: { cancelledAt: new Date(), activeUserId: null, activeNewEmail: null },
       });
     });
+    if (communityId) await this.securityActivity.recordBestEffort({ communityId, userId, eventType: 'PASSWORD_CHANGED', context: requestContext, notify: true });
     return { ok: true };
   }
 
@@ -465,6 +550,15 @@ export class AuthService {
     const result = await this.passwords.verify(storedHash, candidatePassword);
     if (result.valid) await this.persistPasswordUpgrade(userId, storedHash, result);
     return result.valid;
+  }
+
+  private async verifyUnknownAccountPassword(candidatePassword: string) {
+    try {
+      this.invalidPasswordHash ??= this.passwords.hash(randomBytes(32).toString('base64url'));
+      return await this.passwords.verify(await this.invalidPasswordHash, candidatePassword);
+    } catch {
+      return { valid: false, needsRehash: false };
+    }
   }
 
   private async persistPasswordUpgrade(
@@ -617,7 +711,7 @@ export class AuthService {
     throw new UnauthorizedException('Session expired.');
   }
 
-  private async createSessionResponse(userId: string) {
+  private async createSessionResponse(userId: string, requestContext?: AuditRequestContext, authenticationMethod = 'PASSWORD') {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       include: { memberships: { include: { role: true, profile: true }, where: { status: MembershipStatus.ACTIVE } } },
@@ -637,7 +731,26 @@ export class AuthService {
         expiresAt: deadlines.absoluteExpiresAt,
         lastActivityAt: now,
         idleExpiresAt: deadlines.idleExpiresAt,
+        authenticationMethod,
+        createdIp: requestContext?.sourceIp,
+        createdCountryCode: requestContext?.countryCode,
+        createdCountryName: requestContext?.countryName,
+        lastSeenIp: requestContext?.sourceIp,
+        lastSeenCountryCode: requestContext?.countryCode,
+        lastSeenCountryName: requestContext?.countryName,
+        userAgent: requestContext?.userAgent,
+        browser: requestContext?.browser,
+        operatingSystem: requestContext?.operatingSystem,
       },
+    });
+    await this.securityActivity.recordBestEffort({
+      communityId: membership.communityId,
+      userId: user.id,
+      eventType: 'LOGIN_NEW_SESSION',
+      context: requestContext,
+      authenticationMethod,
+      sessionId: session.id,
+      notify: true,
     });
     const jwtToken = await this.jwt.signAsync({ sid: token, sub: user.id });
     const permissions = await this.rolePermissions(membership.communityId, membership.role.key);

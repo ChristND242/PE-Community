@@ -3,6 +3,7 @@
 import { Check, KeyRound, Lock, Minus, RotateCcw, Save, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../../components/shell';
+import { isStepUpCancellation, useStepUpAuthentication } from '../../../components/step-up-authentication-dialog';
 import { Card, Spinner, StatusBadge, TableErrorState, TableSkeleton } from '../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
@@ -37,6 +38,7 @@ type DraftPermissions = Record<RoleKey, Permission[]>;
 
 export default function AdminRolesPage() {
   const { t } = useI18n();
+  const stepUp = useStepUpAuthentication();
   const [data, setData] = useState<RolesResponse | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [draftPermissions, setDraftPermissions] = useState<DraftPermissions | null>(null);
@@ -93,15 +95,19 @@ export default function AdminRolesPage() {
     if (!draftPermissions || !dirty || saveState === 'saving') return;
     setSaveState('saving');
     try {
-      const updated = await apiFetch<RolesResponse>(`/admin/${COMMUNITY_ID}/roles/permissions`, {
+      const updated = await stepUp.run(() => apiFetch<RolesResponse>(`/admin/${COMMUNITY_ID}/roles/permissions`, {
         method: 'PATCH',
         body: JSON.stringify({
           roles: (['admin', 'member'] as const).map((roleKey) => ({ roleKey, permissionKeys: draftPermissions[roleKey] })),
         }),
-      });
+      }));
       setData(updated);
       setSaveState('success');
-    } catch {
+    } catch (caught) {
+      if (isStepUpCancellation(caught)) {
+        setSaveState('idle');
+        return;
+      }
       setSaveState('error');
     }
   }
@@ -199,6 +205,7 @@ export default function AdminRolesPage() {
           </>
         )}
       </div>
+      {stepUp.dialog}
     </AppShell>
   );
 }

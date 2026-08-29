@@ -22,13 +22,24 @@ type MemberScheduleSourceFilter = 'events' | 'taskDeadlines';
 
 const MEMBER_SCHEDULE_SOURCES: MemberScheduleSourceFilter[] = ['events', 'taskDeadlines'];
 
+export type FeedPublisherVerification = 'ADMINISTRATOR' | 'OWNER' | 'OFFICIAL_COMMUNITY' | null;
+
+export function feedPublisherVerification(authorMode: AnnouncementAuthorMode | FeedCommentAuthorMode, roleKey?: string | null): FeedPublisherVerification {
+  if (authorMode === 'COMMUNITY_TEAM') return 'OFFICIAL_COMMUNITY';
+  if (roleKey?.toLowerCase() === 'owner') return 'OWNER';
+  return roleKey?.toLowerCase() === 'admin' ? 'ADMINISTRATOR' : null;
+}
+
 const feedCommentAuthorSelect = (communityId: string) => Prisma.validator<Prisma.UserSelect>()({
   id: true,
   name: true,
   memberships: {
     where: { communityId },
     take: 1,
-    select: { profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } },
+    select: {
+      role: { select: { key: true } },
+      profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } },
+    },
   },
 });
 
@@ -95,7 +106,10 @@ export class CommunitiesService {
           memberships: {
             where: { communityId },
             take: 1,
-            select: { profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } } },
+            select: {
+              role: { select: { key: true } },
+              profile: { select: { avatarUrl: true, dicebearStyle: true, dicebearSeed: true } },
+            },
           },
         },
       })
@@ -108,6 +122,7 @@ export class CommunitiesService {
       const publisher = publisherId ? publisherById.get(publisherId) : undefined;
       const profile = publisher?.memberships[0]?.profile;
       const communityTeam = announcement.authorMode === AnnouncementAuthorMode.COMMUNITY_TEAM;
+      const verification = feedPublisherVerification(announcement.authorMode, publisher?.memberships[0]?.role.key);
       return {
         ...announcementData,
         likeCount: _count.likes,
@@ -120,6 +135,7 @@ export class CommunitiesService {
           dicebearStyle: null,
           dicebearSeed: null,
           mode: AnnouncementAuthorMode.COMMUNITY_TEAM,
+          verification,
         } : publisher ? {
           id: publisher.id,
           name: publisher.name,
@@ -127,6 +143,7 @@ export class CommunitiesService {
           dicebearStyle: profile?.dicebearStyle ?? null,
           dicebearSeed: profile?.dicebearSeed ?? null,
           mode: AnnouncementAuthorMode.USER,
+          verification,
         } : null,
         readReceipt: receiptByAnnouncementId.get(announcement.id) ?? null,
       };
@@ -897,7 +914,7 @@ type FeedCommentShapeInput = {
   body: string;
   createdAt: Date;
   authorMode: FeedCommentAuthorMode;
-  user: { id: string; name: string; memberships: Array<{ profile: FeedCommentAuthorProfile | null }> };
+  user: { id: string; name: string; memberships: Array<{ role: { key: string }; profile: FeedCommentAuthorProfile | null }> };
   likes?: Array<{ id: string }>;
   _count?: { likes: number };
   replies?: FeedCommentShapeInput[];
@@ -909,7 +926,7 @@ type FeedCommentResponseDto = {
   createdAt: Date;
   likeCount: number;
   viewerHasLiked: boolean;
-  author: { id: string | null; name: string; mode: FeedCommentAuthorMode } & FeedCommentAuthorProfile;
+  author: { id: string | null; name: string; mode: FeedCommentAuthorMode; verification: FeedPublisherVerification } & FeedCommentAuthorProfile;
   replies: FeedCommentResponseDto[];
 };
 
@@ -929,6 +946,7 @@ function feedCommentShape(comment: FeedCommentShapeInput): FeedCommentResponseDt
       dicebearStyle: communityTeam ? null : profile?.dicebearStyle ?? null,
       dicebearSeed: communityTeam ? null : profile?.dicebearSeed ?? null,
       mode: comment.authorMode,
+      verification: feedPublisherVerification(comment.authorMode, comment.user.memberships[0]?.role.key),
     },
     replies: (comment.replies ?? []).map(feedCommentShape),
   };

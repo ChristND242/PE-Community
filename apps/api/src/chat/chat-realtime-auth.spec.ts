@@ -13,6 +13,7 @@ const requestUser = {
   },
   role: 'OWNER',
   permissions: ['chat.view'],
+  sessionId: 'session-1',
   avatarUrl: null,
   dicebearStyle: null,
   dicebearSeed: null,
@@ -27,6 +28,7 @@ test('an immediate chat event awaits in-flight namespace authentication', async 
   const auth = {
     cookieName: 'pe_session',
     userFromCookie: () => authentication,
+    revalidateUserSession: async () => requestUser,
   };
   let participantChecks = 0;
   const chat = {
@@ -73,4 +75,28 @@ test('an immediate chat event awaits in-flight namespace authentication', async 
   assert.equal(disconnects, 0);
   assert.ok(emitted.some(({ event }) => event === 'chat:conversation:joined'));
   assert.ok(!emitted.some(({ event, payload }) => event === 'chat:error' && (payload as { code?: string }).code === 'unauthorized'));
+});
+
+test('a revoked cached session is rejected before another chat action', async () => {
+  let participantChecks = 0;
+  let disconnects = 0;
+  const gateway = new ChatGateway({
+    cookieName: 'pe_session',
+    revalidateUserSession: async () => { throw new Error('revoked'); },
+  } as never, {
+    ensureParticipant: async () => { participantChecks += 1; },
+  } as never);
+  const emitted: Array<{ event: string; payload: unknown }> = [];
+  const client = {
+    id: 'socket-revoked',
+    data: { user: requestUser, joinedConversationIds: new Set<string>() },
+    emit: (event: string, payload: unknown) => emitted.push({ event, payload }),
+    disconnect: () => { disconnects += 1; },
+  };
+
+  await gateway.joinConversation(client as never, { conversationId: 'conversation-1' });
+
+  assert.equal(participantChecks, 0);
+  assert.equal(disconnects, 1);
+  assert.ok(emitted.some(({ event, payload }) => event === 'chat:error' && (payload as { code?: string }).code === 'unauthorized'));
 });

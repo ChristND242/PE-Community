@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { apiFetch } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { Card, LoadingButton } from './ui';
+import { isStepUpCancellation, useStepUpAuthentication } from './step-up-authentication-dialog';
 
 type TwoFactorStatus = {
   platformEnabled: boolean;
@@ -22,6 +23,7 @@ type TwoFactorSetup = {
 
 export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
+  const stepUp = useStepUpAuthentication();
   const [status, setStatus] = useState<TwoFactorStatus | null>(null);
   const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
   const [code, setCode] = useState('');
@@ -46,8 +48,9 @@ export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
     if (loading) return;
     setLoading('setup');
     try {
-      setSetup(await apiFetch<TwoFactorSetup>('/me/2fa/setup', { method: 'POST' }));
-    } catch {
+      setSetup(await stepUp.run(() => apiFetch<TwoFactorSetup>('/me/2fa/setup', { method: 'POST' })));
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.security.twoFactorSetupFailed);
     } finally {
       setLoading(null);
@@ -58,14 +61,15 @@ export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
     if (loading || code.trim().length < 6) return;
     setLoading('verify');
     try {
-      const result = await apiFetch<{ enabled: boolean; confirmedAt?: string | null; backupCodes?: string[]; backupCodesRemaining?: number }>('/me/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) });
+      const result = await stepUp.run(() => apiFetch<{ enabled: boolean; confirmedAt?: string | null; backupCodes?: string[]; backupCodesRemaining?: number }>('/me/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }));
       setStatus((current) => current ? { ...current, ...result } : current);
       setSetup(null);
       setCode('');
       setBackupCodes(result.backupCodes ?? []);
       setSavedBackupCodes(false);
       toast.success(t.security.twoFactorEnabledSuccess);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.security.invalidAuthenticationCode);
     } finally {
       setLoading(null);
@@ -76,7 +80,7 @@ export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
     if (loading || (!password.trim() && !code.trim())) return;
     setLoading('disable');
     try {
-      await apiFetch('/me/2fa/disable', { method: 'POST', body: JSON.stringify({ password, code }) });
+      await stepUp.run(() => apiFetch('/me/2fa/disable', { method: 'POST', body: JSON.stringify({ password, code }) }));
       setStatus((current) => current ? { ...current, enabled: false, confirmedAt: null } : current);
       setSetup(null);
       setCode('');
@@ -84,7 +88,8 @@ export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
       setBackupCodes([]);
       setSavedBackupCodes(false);
       toast.success(t.security.twoFactorDisabledSuccess);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.security.twoFactorDisableFailed);
     } finally {
       setLoading(null);
@@ -95,14 +100,15 @@ export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
     if (regenerating || (!password.trim() && !code.trim())) return;
     setRegenerating(true);
     try {
-      const result = await apiFetch<{ backupCodes: string[]; backupCodesRemaining: number }>('/me/2fa/backup-codes/regenerate', { method: 'POST', body: JSON.stringify({ password, code }) });
+      const result = await stepUp.run(() => apiFetch<{ backupCodes: string[]; backupCodesRemaining: number }>('/me/2fa/backup-codes/regenerate', { method: 'POST', body: JSON.stringify({ password, code }) }));
       setBackupCodes(result.backupCodes);
       setSavedBackupCodes(false);
       setCode('');
       setPassword('');
       setStatus((current) => current ? { ...current, backupCodesRemaining: result.backupCodesRemaining } : current);
       toast.success(t.security.backupCodesGenerated);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.security.backupCodesGenerateFailed);
     } finally {
       setRegenerating(false);
@@ -133,6 +139,7 @@ export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
   if (!status?.platformEnabled) return null;
 
   return (
+    <>
     <Card className={embedded ? 'border-0 bg-transparent p-0 shadow-none' : 'rounded-2xl border-white/10 bg-[#101715] p-4 shadow-black/20'}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
@@ -215,6 +222,8 @@ export function TwoFactorCard({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
     </Card>
+    {stepUp.dialog}
+    </>
   );
 }
 

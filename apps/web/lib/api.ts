@@ -26,14 +26,37 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return response.json() as Promise<T>;
 }
 
+export async function apiDownload(path: string, init?: RequestInit) {
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    handleUnauthorizedResponse(response);
+    throw new ApiRequestError(response.status, await response.text());
+  }
+  return {
+    blob: await response.blob(),
+    filename: attachmentFilename(response.headers.get('content-disposition')),
+  };
+}
+
 export class ApiRequestError extends Error {
+  readonly code: string | null;
+
   constructor(
     readonly status: number,
     message: string,
   ) {
     super(message);
     this.name = 'ApiRequestError';
+    this.code = apiErrorCode(message);
   }
+}
+
+export function isApiRequestError(error: unknown, status: number, code: string) {
+  return error instanceof ApiRequestError && error.status === status && error.code === code;
 }
 
 export function userFacingApiError(error: unknown, fallback: string) {
@@ -52,4 +75,18 @@ export function handleUnauthorizedResponse(response: Pick<Response, 'status'>) {
     window.location.replace('/login');
   }
   return true;
+}
+
+function apiErrorCode(body: string) {
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown };
+    return typeof parsed.code === 'string' ? parsed.code : null;
+  } catch {
+    return null;
+  }
+}
+
+function attachmentFilename(value: string | null) {
+  const match = value?.match(/(?:^|;)\s*filename="([A-Za-z0-9._-]+)"(?:;|$)/i);
+  return match?.[1] ?? null;
 }

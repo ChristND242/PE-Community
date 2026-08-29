@@ -10,6 +10,8 @@ import { ProfilePhoto } from '../../../components/profile-photo';
 import { ProfileSocialLinks } from '../../../components/profile-social-links';
 import { AppShell } from '../../../components/shell';
 import { TwoFactorCard } from '../../../components/two-factor-card';
+import { PasskeySettingsCard } from '../../../components/passkey-settings-card';
+import { AccountSecurityActivity } from '../../../components/account-security-activity';
 import { Button, Card, LoadingButton, TableErrorState, TableSkeleton } from '../../../components/ui';
 import { apiFetch, apiUrl } from '../../../lib/api';
 import { DicebearStyleName, dicebearAvatarOptions } from '../../../lib/avatar';
@@ -401,6 +403,12 @@ export default function ProfilePage() {
         </ProfileTabPanel>
         <ProfileTabPanel active={activeTab === 'two-factor'} id="member-profile-two-factor-panel" labelledBy="member-profile-two-factor-tab">
           <TwoFactorCard />
+        </ProfileTabPanel>
+        <ProfileTabPanel active={activeTab === 'passkeys'} id="member-profile-passkeys-panel" labelledBy="member-profile-passkeys-tab">
+          <PasskeySettingsCard />
+        </ProfileTabPanel>
+        <ProfileTabPanel active={activeTab === 'sessions'} id="member-profile-sessions-panel" labelledBy="member-profile-sessions-tab">
+          <AccountSecurityActivity />
         </ProfileTabPanel>
       </div>
     </AppShell>

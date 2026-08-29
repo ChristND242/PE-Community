@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, Res, UploadedFiles, UseInterceptors } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
 import { AuthService, RequestUser } from '../auth/auth.service';
 import { CommunitiesService } from '../communities/communities.service';
@@ -11,6 +11,10 @@ import { AdminService } from './admin.service';
 import { ProfileLinksService } from '../profile-links/profile-links.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { randomUUID } from 'crypto';
+import { maxPublicationCoverUploadSize, type PublicationCoverUploadFile } from '../uploads';
+import { StepUpService } from '../auth/step-up.service';
+import { auditRequestContext } from '../auth/auth-http';
+import { SecurityActivityService } from '../auth/security-activity.service';
 
 @Controller('admin/:communityId')
 export class AdminController {
@@ -21,6 +25,8 @@ export class AdminController {
     private readonly communities: CommunitiesService,
     private readonly profileLinks: ProfileLinksService,
     private readonly auditLogs: AuditLogService,
+    private readonly stepUp: StepUpService,
+    private readonly securityActivity: SecurityActivityService,
   ) {}
 
   private async requireAdminPermission(req: Request, communityId: string, permission: Permission): Promise<RequestUser> {
@@ -374,9 +380,10 @@ export class AdminController {
   }
 
   @Post('announcements')
-  async createAnnouncement(@Param('communityId') communityId: string, @Req() req: Request, @Body() body: Record<string, unknown>) {
+  @UseInterceptors(FileInterceptor('coverImage', { limits: { fileSize: maxPublicationCoverUploadSize } }))
+  async createAnnouncement(@Param('communityId') communityId: string, @Req() req: Request, @Body() body: Record<string, unknown>, @UploadedFile() coverImage?: PublicationCoverUploadFile) {
     const user = await this.requireAdminPermission(req, communityId, body.publish ? PERMISSIONS.announcementsPublish : PERMISSIONS.announcementsCreate);
-    return this.admin.createAnnouncement(communityId, user.id, body);
+    return this.admin.createAnnouncement(communityId, user.id, body, coverImage);
   }
 
   @Get('announcements/:announcementId')
@@ -386,9 +393,10 @@ export class AdminController {
   }
 
   @Patch('announcements/:announcementId')
-  async updateAnnouncement(@Param('communityId') communityId: string, @Param('announcementId') announcementId: string, @Req() req: Request, @Body() body: Record<string, unknown>) {
+  @UseInterceptors(FileInterceptor('coverImage', { limits: { fileSize: maxPublicationCoverUploadSize } }))
+  async updateAnnouncement(@Param('communityId') communityId: string, @Param('announcementId') announcementId: string, @Req() req: Request, @Body() body: Record<string, unknown>, @UploadedFile() coverImage?: PublicationCoverUploadFile) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.announcementsCreate);
-    return this.admin.updateAnnouncement(communityId, announcementId, user.id, body);
+    return this.admin.updateAnnouncement(communityId, announcementId, user.id, body, coverImage);
   }
 
   @Post('announcements/:announcementId/publish')
@@ -914,31 +922,81 @@ export class AdminController {
   @Patch('members/:memberId/reset-password')
   async resetMemberPassword(@Param('communityId') communityId: string, @Param('memberId') memberId: string, @Req() req: Request, @Body() body: Record<string, unknown>) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.membersUpdate);
-    return this.admin.resetMemberPassword(communityId, memberId, user.id, body);
+    await this.stepUp.requireRecent(user);
+    const target = await this.admin.member(communityId, memberId);
+    const result = await this.admin.resetMemberPassword(communityId, memberId, user.id, body);
+    await this.securityActivity.recordBestEffort({
+      communityId,
+      userId: target.user.id,
+      eventType: 'ACCOUNT_PASSWORD_RESET',
+      context: auditRequestContext(req),
+      notify: true,
+    });
+    return result;
   }
 
   @Post('members/:memberId/2fa/reset')
   async resetMemberTwoFactor(@Param('communityId') communityId: string, @Param('memberId') memberId: string, @Req() req: Request, @Body() body: Record<string, unknown>) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.membersUpdate);
-    return this.admin.resetMemberTwoFactor(communityId, memberId, user.id, body);
+    await this.stepUp.requireRecent(user);
+    const result = await this.admin.resetMemberTwoFactor(communityId, memberId, user.id, body);
+    await this.securityActivity.recordBestEffort({
+      communityId,
+      userId: result.user.id,
+      eventType: 'ACCOUNT_TOTP_RESET',
+      context: auditRequestContext(req),
+      notify: true,
+    });
+    return result;
   }
 
   @Patch('members/:memberId/suspend')
   async suspendMember(@Param('communityId') communityId: string, @Param('memberId') memberId: string, @Req() req: Request, @Body() body: { status?: unknown }) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.membersSuspend);
-    return this.admin.suspendMember(communityId, memberId, user.id, body.status);
+    await this.stepUp.requireRecent(user);
+    const result = await this.admin.suspendMember(communityId, memberId, user.id, body.status);
+    await this.securityActivity.recordBestEffort({
+      communityId,
+      userId: result.user.id,
+      eventType: 'ACCOUNT_STATUS_CHANGED',
+      context: auditRequestContext(req),
+      metadata: { status: result.status },
+      notify: true,
+    });
+    return result;
   }
 
   @Patch('members/:memberId/remove')
   async removeMember(@Param('communityId') communityId: string, @Param('memberId') memberId: string, @Req() req: Request) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.membersDelete);
-    return this.admin.removeMember(communityId, memberId, user.id);
+    await this.stepUp.requireRecent(user);
+    const target = await this.admin.member(communityId, memberId);
+    const result = await this.admin.removeMember(communityId, memberId, user.id);
+    await this.securityActivity.recordBestEffort({
+      communityId,
+      userId: target.user.id,
+      eventType: 'ACCOUNT_STATUS_CHANGED',
+      context: auditRequestContext(req),
+      metadata: { status: 'REMOVED' },
+      notify: true,
+    });
+    return result;
   }
 
   @Patch('members/:memberId/role')
   async changeRole(@Param('communityId') communityId: string, @Param('memberId') memberId: string, @Req() req: Request, @Body() body: { roleKey?: string }) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.rolesManage);
-    return this.admin.changeRole(communityId, memberId, user.id, body.roleKey);
+    await this.stepUp.requireRecent(user);
+    const result = await this.admin.changeRole(communityId, memberId, user.id, body.roleKey);
+    await this.securityActivity.recordBestEffort({
+      communityId,
+      userId: result.user.id,
+      eventType: 'ACCOUNT_ROLE_CHANGED',
+      context: auditRequestContext(req),
+      metadata: { role: result.role.key },
+      notify: true,
+    });
+    return result;
   }
 
   @Get('registrations')
@@ -968,6 +1026,7 @@ export class AdminController {
   @Patch('roles/permissions')
   async updateRolePermissions(@Param('communityId') communityId: string, @Req() req: Request, @Body() body: Record<string, unknown>) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.rolesManage);
+    await this.stepUp.requireRecent(user);
     return this.admin.updateRolePermissions(communityId, user.id, user.role, body);
   }
 }

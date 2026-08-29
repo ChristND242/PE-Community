@@ -49,6 +49,19 @@ export function evaluateAutomationExecution(
 
 export * from './email.js';
 
+export const DEFAULT_SECURITY_RETENTION_DAYS = 180;
+export const MINIMUM_SECURITY_RETENTION_DAYS = 30;
+export const MAXIMUM_SECURITY_RETENTION_DAYS = 3_650;
+
+export function parseSecurityRetentionDays(name: string, value: string | undefined) {
+  if (value === undefined || value.trim() === '') return DEFAULT_SECURITY_RETENTION_DAYS;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < MINIMUM_SECURITY_RETENTION_DAYS || parsed > MAXIMUM_SECURITY_RETENTION_DAYS) {
+    throw new Error(`${name} must be an integer between ${MINIMUM_SECURITY_RETENTION_DAYS} and ${MAXIMUM_SECURITY_RETENTION_DAYS}.`);
+  }
+  return parsed;
+}
+
 export const PERMISSIONS = {
   membersRead: 'members.read',
   membersCreate: 'members.create',

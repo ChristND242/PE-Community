@@ -6,10 +6,12 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { AppSelect } from '../../../../components/app-select';
+import { IdentityVerificationBadge } from '../../../../components/identity-verification-badge';
 import { ProfilePhoto } from '../../../../components/profile-photo';
 import { AppShell } from '../../../../components/shell';
 import { Card, ConfirmDialog, DataTablePagination, LoadingButton, StatusBadge, TableEmptyState, TableErrorState, TableSkeleton } from '../../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../../lib/api';
+import { identityVerificationForPublisher } from '../../../../lib/identity-verification';
 import { statusLabel, useI18n } from '../../../../lib/i18n';
 import { userRoleLabel } from '../../../../lib/user-role';
 import { formatDate } from '../../../../lib/utils';
@@ -22,7 +24,7 @@ type AnnouncementComment = {
   id: string;
   body: string;
   createdAt: string;
-  author: { id: string | null; name: string; avatarUrl: string | null; dicebearStyle: string | null; dicebearSeed: string | null; mode: 'USER' | 'COMMUNITY_TEAM' };
+  author: { id: string | null; name: string; avatarUrl: string | null; dicebearStyle: string | null; dicebearSeed: string | null; mode: 'USER' | 'COMMUNITY_TEAM'; verification?: 'ADMINISTRATOR' | 'OWNER' | 'OFFICIAL_COMMUNITY' | null };
   likeCount: number;
   viewerHasLiked: boolean;
   replies: AnnouncementComment[];
@@ -294,7 +296,7 @@ export default function AdminAnnouncementDetailPage() {
                         <div className="flex items-start gap-3">
                           <ProfilePhoto name={comment.author.mode === 'COMMUNITY_TEAM' ? t.dashboard.communityTeam : comment.author.name} avatarUrl={comment.author.mode === 'COMMUNITY_TEAM' ? null : comment.author.avatarUrl} dicebearStyle={comment.author.mode === 'COMMUNITY_TEAM' ? null : comment.author.dicebearStyle} dicebearSeed={comment.author.mode === 'COMMUNITY_TEAM' ? null : comment.author.dicebearSeed} size="sm" className="h-9 w-9 shrink-0 rounded-full text-[10px]" />
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5"><p className="text-sm font-semibold text-white">{comment.author.mode === 'COMMUNITY_TEAM' ? t.dashboard.communityTeam : comment.author.name}</p><span className="text-xs text-white/30" aria-hidden="true">·</span><time dateTime={comment.createdAt} className="text-xs text-white/42">{formatCommentTime(comment.createdAt, lang)}</time></div>
+                            <div className="flex flex-wrap items-center gap-1.5"><p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{comment.author.mode === 'COMMUNITY_TEAM' ? t.dashboard.communityTeam : comment.author.name}</span><IdentityVerificationBadge kind={identityVerificationForPublisher(comment.author.verification)} size="xs" /></p><span className="text-xs text-white/30" aria-hidden="true">·</span><time dateTime={comment.createdAt} className="text-xs text-white/42">{formatCommentTime(comment.createdAt, lang)}</time></div>
                             <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-white/72">{comment.body}</p>
                             <div className="mt-2 flex items-center gap-4 text-xs text-white/42">
                               <CommentLikeButton comment={comment} busy={Boolean(likingCommentId)} onClick={() => void toggleCommentLike(comment.id)} likeLabel={t.dashboard.likeFeedComment} unlikeLabel={t.dashboard.unlikeFeedComment} />
@@ -316,7 +318,7 @@ export default function AdminAnnouncementDetailPage() {
                                   <div key={reply.id} className="relative flex items-start gap-3">
                                     <span aria-hidden="true" className="absolute -left-6 top-0 h-4 w-5 rounded-bl-xl border-b border-l border-emerald-300/20 sm:-left-7" />
                                     <ProfilePhoto name={reply.author.mode === 'COMMUNITY_TEAM' ? t.dashboard.communityTeam : reply.author.name} avatarUrl={reply.author.mode === 'COMMUNITY_TEAM' ? null : reply.author.avatarUrl} dicebearStyle={reply.author.mode === 'COMMUNITY_TEAM' ? null : reply.author.dicebearStyle} dicebearSeed={reply.author.mode === 'COMMUNITY_TEAM' ? null : reply.author.dicebearSeed} size="sm" className="h-8 w-8 shrink-0 rounded-full text-[10px]" />
-                                    <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><p className="text-sm font-semibold text-white">{reply.author.mode === 'COMMUNITY_TEAM' ? t.dashboard.communityTeam : reply.author.name}</p><span className="text-xs text-white/30" aria-hidden="true">·</span><time dateTime={reply.createdAt} className="text-xs text-white/42">{formatCommentTime(reply.createdAt, lang)}</time></div><p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-white/68">{reply.body}</p><div className="mt-2 text-xs text-white/42"><CommentLikeButton comment={reply} busy={Boolean(likingCommentId)} onClick={() => void toggleCommentLike(reply.id)} likeLabel={t.dashboard.likeFeedComment} unlikeLabel={t.dashboard.unlikeFeedComment} /></div></div>
+                                    <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{reply.author.mode === 'COMMUNITY_TEAM' ? t.dashboard.communityTeam : reply.author.name}</span><IdentityVerificationBadge kind={identityVerificationForPublisher(reply.author.verification)} size="xs" /></p><span className="text-xs text-white/30" aria-hidden="true">·</span><time dateTime={reply.createdAt} className="text-xs text-white/42">{formatCommentTime(reply.createdAt, lang)}</time></div><p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-white/68">{reply.body}</p><div className="mt-2 text-xs text-white/42"><CommentLikeButton comment={reply} busy={Boolean(likingCommentId)} onClick={() => void toggleCommentLike(reply.id)} likeLabel={t.dashboard.likeFeedComment} unlikeLabel={t.dashboard.unlikeFeedComment} /></div></div>
                                   </div>
                                 ))}
                               </div>

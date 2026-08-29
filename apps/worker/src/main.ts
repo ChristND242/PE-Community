@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { EmailLocale, EmailTemplateKey, LocalizedEmailTemplate } from '@pe/shared';
-import { evaluateAutomationExecution } from '@pe/shared';
+import { evaluateAutomationExecution, parseSecurityRetentionDays } from '@pe/shared';
 import { Queue, Worker } from 'bullmq';
 import { createDecipheriv, createHash } from 'crypto';
 import { unlink } from 'fs/promises';
@@ -8,6 +8,10 @@ import { join } from 'path';
 import nodemailer from 'nodemailer';
 import { createRequire } from 'module';
 import { loadAutomationExecutionDecision } from './automation-lifecycle.js';
+import { runSecurityRetentionCleanup } from './security-retention.js';
+import { validateWorkerSecurityConfig } from './security-runtime-config.js';
+
+validateWorkerSecurityConfig();
 
 const {
   builtInEmailTemplate,
@@ -25,13 +29,17 @@ const AUTOMATION_FAILURE_REASONS = {
 } as const;
 const emailQueue = new Queue(emailQueueName, { connection });
 const notificationQueue = new Queue(notificationQueueName, { connection });
+const securityRetentionConfig = {
+  eventRetentionDays: parseSecurityRetentionDays('SECURITY_EVENT_RETENTION_DAYS', process.env.SECURITY_EVENT_RETENTION_DAYS),
+  sessionRetentionDays: parseSecurityRetentionDays('SESSION_SECURITY_METADATA_RETENTION_DAYS', process.env.SESSION_SECURITY_METADATA_RETENTION_DAYS),
+};
 
 new Worker(
   emailQueueName,
   async (job) => {
     if (job.name !== 'send-email') return;
     const { campaignId, recipientId, locale } = job.data as { campaignId: string; recipientId: string; locale: EmailLocale };
-    console.log('[email:worker] processing queued delivery');
+    console.log(`[email:worker] processing campaign=${campaignId} recipient=${recipientId}`);
     await sendCampaignRecipient(campaignId, recipientId, normalizeEmailLocale(locale));
   },
   { connection },
@@ -50,6 +58,16 @@ new Worker(
       console.log(`[notification:worker] event task reminders created=${created}`);
       return;
     }
+    if (job.name === 'email-outbox-recovery') {
+      const queued = await recoverQueuedEmailRecipients();
+      console.log(`[email:worker] recovered queued recipients=${queued}`);
+      return;
+    }
+    if (job.name === 'security-retention-cleanup') {
+      const result = await runSecurityRetentionCleanup(prisma, securityRetentionConfig);
+      console.log(`[security:retention] security events deleted=${result.securityEventsDeleted} expired sessions deleted=${result.expiredSessionsDeleted} durationMs=${result.durationMs}`);
+      return;
+    }
     if (job.name === 'registration-email') {
       await createRegistrationEmail(job.data as RegistrationNotificationJob);
       return;
@@ -66,6 +84,26 @@ void notificationQueue.add('event-task-reminders', {}, {
   removeOnFail: 48,
 }).catch((error) => {
   console.error(`[notification:worker] could not schedule event task reminders: ${error instanceof Error ? error.message : String(error)}`);
+});
+
+void notificationQueue.add('email-outbox-recovery', {}, {
+  jobId: 'email-outbox-recovery-minutely',
+  repeat: { every: 60 * 1000 },
+  removeOnComplete: 24,
+  removeOnFail: 48,
+}).catch((error) => {
+  console.error(`[email:worker] could not schedule outbox recovery: ${error instanceof Error ? error.message : String(error)}`);
+});
+
+void notificationQueue.add('security-retention-cleanup', {}, {
+  jobId: 'security-retention-cleanup-daily',
+  repeat: { every: 24 * 60 * 60 * 1_000 },
+  attempts: 3,
+  backoff: { type: 'exponential', delay: 60_000 },
+  removeOnComplete: 30,
+  removeOnFail: 90,
+}).catch((error) => {
+  console.error(`[security:retention] could not schedule cleanup: ${error instanceof Error ? error.message : String(error)}`);
 });
 
 console.log(`[worker] listening on ${emailQueueName} and ${notificationQueueName}`);
@@ -745,11 +783,16 @@ async function sendCampaignRecipient(campaignId: string, recipientId: string, qu
   if (storedLocale && storedLocale !== queuedLocale) {
     throw new Error('Queued email locale does not match the stored campaign locale.');
   }
-  if (recipient.campaign.status === 'CANCELED' || !['PENDING', 'QUEUED'].includes(recipient.status)) {
-    console.log(`[email:worker] skipped delivery with status=${recipient.status}`);
+  if (recipient.campaign.status === 'CANCELED' || !['PENDING', 'QUEUED', 'FAILED'].includes(recipient.status)) {
+    console.log(`[email:worker] skipped campaign=${campaignId} recipient=${recipientId} status=${recipient.status}`);
     await updateCampaignStatus(campaignId);
     return;
   }
+  const claimed = await prisma.emailRecipient.updateMany({
+    where: { id: recipient.id, status: { in: ['PENDING', 'QUEUED', 'FAILED'] } },
+    data: { status: 'SENDING', errorMessage: null },
+  });
+  if (!claimed.count) return;
   await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status: 'SENDING' } });
   try {
     const config = await effectiveConfig(recipient.campaign.communityId);
@@ -757,16 +800,47 @@ async function sendCampaignRecipient(campaignId: string, recipientId: string, qu
     const result = await sendSmtp(config, recipient.email, recipient.campaign.subject, recipient.campaign.textBody, recipient.campaign.htmlBody);
     await prisma.emailRecipient.update({ where: { id: recipient.id }, data: { status: 'SENT', sentAt: new Date(), errorMessage: null } });
     await prisma.emailDeliveryAttempt.create({ data: { campaignId, recipientId, status: 'SENT', providerMessageId: result.messageId } });
-    console.log('[email:worker] delivery accepted');
+    console.log(`[email:worker] sent campaign=${campaignId} recipient=${recipientId} messageId=${result.messageId ?? 'accepted'}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Email delivery failed.';
     await prisma.emailRecipient.update({ where: { id: recipient.id }, data: { status: 'FAILED', errorMessage: message } });
     await prisma.emailDeliveryAttempt.create({ data: { campaignId, recipientId, status: 'FAILED', errorMessage: message } });
-    console.error('[email:worker] delivery failed');
+    console.error(`[email:worker] failed campaign=${campaignId} recipient=${recipientId}: ${message}`);
     throw error;
   } finally {
     await updateCampaignStatus(campaignId);
   }
+}
+
+async function recoverQueuedEmailRecipients() {
+  const recipients = await prisma.emailRecipient.findMany({
+    where: { status: { in: ['PENDING', 'QUEUED', 'FAILED'] }, campaign: { status: { not: 'CANCELED' } } },
+    include: {
+      campaign: { select: { id: true, metadata: true } },
+      attempts: { select: { id: true }, take: 3 },
+    },
+    orderBy: { createdAt: 'asc' },
+    take: 100,
+  });
+  const retryable = recipients.filter((recipient) => recipient.attempts.length < 3);
+  for (const recipient of retryable) {
+    await emailQueue.add(
+      'send-email',
+      {
+        campaignId: recipient.campaign.id,
+        recipientId: recipient.id,
+        locale: campaignMetadataLocale(recipient.campaign.metadata) ?? 'en',
+      },
+      {
+        jobId: `email-recipient-${recipient.id}`,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+      },
+    );
+  }
+  return retryable.length;
 }
 
 function campaignMetadataLocale(metadata: Prisma.JsonValue): EmailLocale | null {
@@ -807,7 +881,7 @@ function isUsable(config: Awaited<ReturnType<typeof effectiveConfig>>) {
 
 async function sendSmtp(config: Awaited<ReturnType<typeof effectiveConfig>>, to: string, subject: string, text: string, html?: string | null) {
   if (process.env.NODE_ENV !== 'production' && process.env.EMAIL_DEV_LOG === 'true') {
-    console.log('[email:dev] delivery suppressed');
+    console.log(`[email:dev] ${subject} -> ${to}`);
     return { messageId: `dev-${Date.now()}` };
   }
   const transport = nodemailer.createTransport({
@@ -830,25 +904,15 @@ async function updateCampaignStatus(campaignId: string) {
   const recipients = await prisma.emailRecipient.findMany({ where: { campaignId } });
   const sent = recipients.filter((recipient) => recipient.status === 'SENT').length;
   const failed = recipients.filter((recipient) => recipient.status === 'FAILED').length;
-  const pending = recipients.filter((recipient) => recipient.status === 'PENDING' || recipient.status === 'QUEUED').length;
+  const pending = recipients.filter((recipient) => ['PENDING', 'QUEUED', 'SENDING'].includes(recipient.status)).length;
   const canceled = recipients.filter((recipient) => recipient.status === 'CANCELED').length;
   const status = pending > 0 ? 'SENDING' : failed > 0 && sent > 0 ? 'PARTIAL' : failed > 0 ? 'FAILED' : canceled > 0 && sent > 0 ? 'PARTIAL' : canceled > 0 ? 'CANCELED' : 'SENT';
   await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status, sentAt: pending === 0 ? new Date() : undefined } });
 }
 
 function encryptionKey() {
-  const secret = encryptionSecret();
+  const secret = process.env.EMAIL_ENCRYPTION_KEY ?? process.env.JWT_SECRET ?? 'local-development-secret-change-before-production';
   return createHash('sha256').update(secret).digest();
-}
-
-function encryptionSecret() {
-  const configured = [process.env.EMAIL_ENCRYPTION_KEY, process.env.JWT_SECRET]
-    .find((value) => value?.trim() && value !== '<generate-a-strong-independent-secret>');
-  if (configured) return configured;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('EMAIL_ENCRYPTION_KEY or JWT_SECRET is required in production.');
-  }
-  return 'local-development-secret-change-before-production';
 }
 
 function decryptSecret(value: string) {

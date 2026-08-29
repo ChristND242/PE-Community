@@ -240,6 +240,63 @@ export class EmailService {
     });
   }
 
+  async queueSecurityEventEmail(eventId: string, recipientEmail?: string) {
+    const existing = await this.prisma.emailCampaign.findFirst({
+      where: { type: 'ACCOUNT_SECURITY_EVENT', metadata: { path: ['securityEventId'], equals: eventId } },
+      include: { recipients: true },
+    });
+    if (existing) {
+      await this.enqueueCampaignRecipients(
+        existing.id,
+        existing.recipients.filter((recipient) => ['PENDING', 'QUEUED', 'FAILED'].includes(recipient.status)),
+        campaignLocale(existing.metadata),
+      );
+      return { id: existing.id, status: existing.status, recipientCount: existing.recipients.length };
+    }
+    const event = await this.prisma.securityEvent.findUnique({
+      where: { id: eventId },
+      include: { user: { select: { id: true, email: true, name: true } }, community: { include: { settings: true } } },
+    });
+    if (!event) throw new BadRequestException('Security event was not found.');
+    const locale = emailLocale(event.community.settings?.defaultLanguage);
+    const french = locale === 'fr';
+    const copy = securityEventEmailCopy(event.eventType, locale, securityEventMetadata(event.metadata));
+    const time = new Intl.DateTimeFormat(french ? 'fr-FR' : 'en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: event.community.settings?.timezone ?? 'UTC',
+    }).format(event.occurredAt);
+    const rendered = renderBrandedEmail({
+      subject: copy.subject,
+      title: copy.title,
+      greeting: french ? `Bonjour ${event.user.name},` : `Hello ${event.user.name},`,
+      body: [
+        ...copy.body,
+        `${french ? 'Heure' : 'Time'}: ${time}`,
+        `${french ? 'Navigateur' : 'Browser'}: ${event.browser}`,
+        `${french ? 'Système d’exploitation' : 'Operating system'}: ${event.operatingSystem}`,
+        `${french ? 'Adresse IP' : 'IP address'}: ${event.ipAddress}`,
+        `${french ? 'Pays' : 'Country'}: ${event.countryName}`,
+        copy.guidance,
+      ],
+      communityName: event.community.name,
+      locale,
+      align: 'left',
+      eyebrow: french ? 'Sécurité du compte' : 'Account security',
+    });
+    return this.queueCampaign({
+      communityId: event.communityId,
+      createdById: event.userId,
+      type: 'ACCOUNT_SECURITY_EVENT',
+      subject: rendered.subject,
+      textBody: rendered.text,
+      htmlBody: rendered.html,
+      locale,
+      metadata: { securityEventId: event.id, eventType: event.eventType, locale },
+      recipients: [{ userId: event.userId, email: recipientEmail ?? event.user.email, name: event.user.name }],
+    });
+  }
+
   async queueEmailChangeVerification(
     communityId: string,
     user: { id: string; name: string },
@@ -756,10 +813,8 @@ export class EmailService {
       });
       return tx.emailCampaign.findUniqueOrThrow({ where: { id: created.id }, include: { recipients: true } });
     });
-    for (const recipient of campaign.recipients) {
-      await this.queue.add('send-email', { campaignId: campaign.id, recipientId: recipient.id, locale }, { attempts: 3, backoff: { type: 'exponential', delay: 5000 } });
-    }
-    console.log(`[email] queued campaign for ${campaign.recipients.length} recipient(s)`);
+    await this.enqueueCampaignRecipients(campaign.id, campaign.recipients, locale);
+    console.log(`[email] queued campaign ${campaign.id} with ${campaign.recipients.length} recipient(s)`);
     return {
       id: campaign.id,
       status: campaign.status,
@@ -783,6 +838,26 @@ export class EmailService {
       };
     }
     return envSmtpConfig();
+  }
+
+  private async enqueueCampaignRecipients(
+    campaignId: string,
+    recipients: Array<{ id: string }>,
+    locale: EmailLocale,
+  ) {
+    for (const recipient of recipients) {
+      await this.queue.add(
+        'send-email',
+        { campaignId, recipientId: recipient.id, locale },
+        {
+          jobId: `email-recipient-${recipient.id}`,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: 100,
+          removeOnFail: 200,
+        },
+      );
+    }
   }
 
   isUsable(config: EffectiveSmtpConfig) {
@@ -948,6 +1023,56 @@ function approvalOnlyTemplate(template: LocalizedEmailTemplate): LocalizedEmailT
 
 function emailLocale(value?: string | null): EmailLocale {
   return value === 'fr' ? 'fr' : 'en';
+}
+
+function securityEventMetadata(value: Prisma.JsonValue | null) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, Prisma.JsonValue> : {};
+}
+
+function securityEventEmailCopy(eventType: string, locale: EmailLocale, metadata: Record<string, Prisma.JsonValue>) {
+  const french = locale === 'fr';
+  const passkeyName = typeof metadata.passkeyName === 'string' ? metadata.passkeyName.slice(0, 80) : french ? 'Clé d’accès' : 'Passkey';
+  const attemptCount = typeof metadata.attemptCount === 'number' ? Math.max(0, Math.min(20, metadata.attemptCount)) : 0;
+  const sourceLines = Array.isArray(metadata.sources)
+    ? metadata.sources.slice(0, 5).flatMap((source) => {
+      if (!source || typeof source !== 'object' || Array.isArray(source)) return [];
+      const ipAddress = typeof source.ipAddress === 'string' ? source.ipAddress.slice(0, 64) : 'Unknown';
+      const countryName = typeof source.countryName === 'string' ? source.countryName.slice(0, 100) : 'Unknown';
+      return [`${ipAddress} — ${countryName}`];
+    })
+    : [];
+  const entries: Record<string, { en: string; fr: string; enBody: string; frBody: string }> = {
+    LOGIN_NEW_SESSION: { en: 'New sign-in to your account', fr: 'Nouvelle connexion à votre compte', enBody: 'A new authenticated session was created for your PE Community account.', frBody: 'Une nouvelle session authentifiée a été créée pour votre compte PE Community.' },
+    LOGIN_FAILED_ALERT: { en: 'Multiple unsuccessful sign-in attempts', fr: 'Plusieurs tentatives de connexion ont échoué', enBody: `We detected ${attemptCount} unsuccessful sign-in attempts within a short period.`, frBody: `Nous avons détecté ${attemptCount} tentatives de connexion infructueuses sur une courte période.` },
+    PASSWORD_CHANGED: { en: 'Your password was changed', fr: 'Votre mot de passe a été modifié', enBody: 'The password for your PE Community account was changed.', frBody: 'Le mot de passe de votre compte PE Community a été modifié.' },
+    EMAIL_CHANGED: { en: 'Your email address was changed', fr: 'Votre adresse courriel a été modifiée', enBody: 'The primary email address for your PE Community account was changed.', frBody: 'L’adresse courriel principale de votre compte PE Community a été modifiée.' },
+    TOTP_ENABLED: { en: 'Two-factor authentication enabled', fr: 'Authentification à deux facteurs activée', enBody: 'Authenticator-based two-factor authentication was enabled.', frBody: 'L’authentification à deux facteurs par application d’authentification a été activée.' },
+    TOTP_DISABLED: { en: 'Two-factor authentication disabled', fr: 'Authentification à deux facteurs désactivée', enBody: 'Authenticator-based two-factor authentication was disabled.', frBody: 'L’authentification à deux facteurs par application d’authentification a été désactivée.' },
+    TOTP_REENROLLED: { en: 'Two-factor authentication reconfigured', fr: 'Authentification à deux facteurs reconfigurée', enBody: 'Authenticator-based two-factor authentication was reconfigured.', frBody: 'L’authentification à deux facteurs par application d’authentification a été reconfigurée.' },
+    BACKUP_CODES_REGENERATED: { en: 'Backup codes regenerated', fr: 'Codes de secours régénérés', enBody: 'New two-factor backup codes were generated. No codes are included in this email.', frBody: 'De nouveaux codes de secours ont été générés. Aucun code ne figure dans ce courriel.' },
+    PASSKEY_ADDED: { en: 'A new passkey was added', fr: 'Une nouvelle clé d’accès a été ajoutée', enBody: `Passkey: ${passkeyName}`, frBody: `Clé d’accès : ${passkeyName}` },
+    PASSKEY_REMOVED: { en: 'A passkey was removed', fr: 'Une clé d’accès a été supprimée', enBody: `Passkey: ${passkeyName}`, frBody: `Clé d’accès : ${passkeyName}` },
+    SESSION_REVOKED: { en: 'An active session was revoked', fr: 'Une session active a été révoquée', enBody: 'An active session was removed from your account.', frBody: 'Une session active a été supprimée de votre compte.' },
+    OTHER_SESSIONS_REVOKED: { en: 'Other sessions were signed out', fr: 'Les autres sessions ont été déconnectées', enBody: 'All other active sessions were signed out.', frBody: 'Toutes les autres sessions actives ont été déconnectées.' },
+    ACCOUNT_ROLE_CHANGED: { en: 'Your account role changed', fr: 'Le rôle de votre compte a changé', enBody: 'An administrator changed your community role.', frBody: 'Un administrateur a modifié votre rôle dans la communauté.' },
+    ACCOUNT_STATUS_CHANGED: { en: 'Your account status changed', fr: 'Le statut de votre compte a changé', enBody: 'An administrator changed your membership status.', frBody: 'Un administrateur a modifié le statut de votre adhésion.' },
+    ACCOUNT_PASSWORD_RESET: { en: 'Your password was reset by an administrator', fr: 'Votre mot de passe a été réinitialisé par un administrateur', enBody: 'An administrator reset your account password.', frBody: 'Un administrateur a réinitialisé le mot de passe de votre compte.' },
+    ACCOUNT_TOTP_RESET: { en: 'Two-factor authentication was reset', fr: 'L’authentification à deux facteurs a été réinitialisée', enBody: 'An administrator reset your two-factor authentication state.', frBody: 'Un administrateur a réinitialisé votre authentification à deux facteurs.' },
+  };
+  const selected = entries[eventType] ?? { en: 'Account security activity', fr: 'Activité de sécurité du compte', enBody: 'A security-sensitive action occurred on your account.', frBody: 'Une action sensible liée à la sécurité a eu lieu sur votre compte.' };
+  return {
+    subject: french ? selected.fr : selected.en,
+    title: french ? selected.fr : selected.en,
+    body: [
+      french ? selected.frBody : selected.enBody,
+      ...(eventType === 'LOGIN_FAILED_ALERT' && sourceLines.length
+        ? [french ? 'Sources récentes :' : 'Recent sources:', ...sourceLines]
+        : []),
+    ],
+    guidance: french
+      ? 'Si vous reconnaissez cette activité, aucune action n’est requise. Sinon, examinez vos sessions actives et sécurisez immédiatement votre compte.'
+      : 'If you recognize this activity, no action is required. Otherwise, review your active sessions and secure your account immediately.',
+  };
 }
 
 function maskEmailAddress(value: string) {

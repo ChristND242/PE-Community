@@ -4,11 +4,13 @@ import { Check, CheckCircle2, ChevronDown, ChevronUp, Download, FileText, Loader
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { apiFetch, apiUrl } from '../lib/api';
+import { identityVerificationForRole } from '../lib/identity-verification';
 import { useI18n } from '../lib/i18n';
+import { IdentityVerificationBadge } from './identity-verification-badge';
 import { ProfilePhoto } from './profile-photo';
 import { ConfirmDialog, LoadingButton } from './ui';
 
-type CollaborationUser = { id: string; name: string; avatarUrl?: string | null; dicebearStyle?: string | null; dicebearSeed?: string | null };
+type CollaborationUser = { id: string; name: string; role?: string | null; avatarUrl?: string | null; dicebearStyle?: string | null; dicebearSeed?: string | null };
 type EventTaskComment = { id: string; body: string; createdAt: string; updatedAt: string; author: CollaborationUser; canArchive: boolean };
 type EventTaskActivity = { id: string; type: string; metadata?: Record<string, unknown> | null; createdAt: string; actor?: CollaborationUser | null };
 type EventTaskAttachment = { id: string; originalName: string; mimeType: string; sizeBytes: number; createdAt: string; uploader: CollaborationUser; canRemove: boolean };
@@ -259,13 +261,13 @@ export function EventTaskCollaboration({ endpointBase, taskId, canComment, refre
         <div>
           {comments === null ? <CollaborationSkeleton /> : comments.length === 0 ? <p className="py-4 text-center text-sm text-white/38">{t.common.noEventTaskComments}</p> : (
             <div className="space-y-3">
-              {comments.map((comment) => <article key={comment.id} className="rounded-lg bg-black/20 p-3.5 ring-1 ring-white/[0.055]"><div className="flex items-start gap-3"><ProfilePhoto name={comment.author.name} avatarUrl={comment.author.avatarUrl} dicebearStyle={comment.author.dicebearStyle} dicebearSeed={comment.author.dicebearSeed} size="sm" className="h-8 w-8 rounded-full text-[10px]" /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-white/80">{comment.author.name}</p><p className="mt-0.5 text-[11px] text-white/35">{formatCollaborationDate(comment.createdAt, lang)}</p></div>{comment.canArchive && <button type="button" title={t.common.archiveComment} aria-label={t.common.archiveComment} onClick={() => setArchiveComment(comment)} className="grid h-7 w-7 place-items-center rounded-full text-white/30 transition hover:bg-rose-300/10 hover:text-rose-100"><Trash2 size={13} /></button>}</div><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-white/60">{comment.body}</p></div></div></article>)}
+              {comments.map((comment) => <article key={comment.id} className="rounded-lg bg-black/20 p-3.5 ring-1 ring-white/[0.055]"><div className="flex items-start gap-3"><ProfilePhoto name={comment.author.name} avatarUrl={comment.author.avatarUrl} dicebearStyle={comment.author.dicebearStyle} dicebearSeed={comment.author.dicebearSeed} size="sm" className="h-8 w-8 rounded-full text-[10px]" /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-white/80"><span className="truncate">{comment.author.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(comment.author.role)} size="xs" /></p><p className="mt-0.5 text-[11px] text-white/35">{formatCollaborationDate(comment.createdAt, lang)}</p></div>{comment.canArchive && <button type="button" title={t.common.archiveComment} aria-label={t.common.archiveComment} onClick={() => setArchiveComment(comment)} className="grid h-7 w-7 place-items-center rounded-full text-white/30 transition hover:bg-rose-300/10 hover:text-rose-100"><Trash2 size={13} /></button>}</div><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-white/60">{comment.body}</p></div></div></article>)}
             </div>
           )}
         </div>
       ) : tab === 'activity' ? (
         <div>
-          {activity === null ? <CollaborationSkeleton /> : activity.length === 0 ? <p className="py-4 text-center text-sm text-white/38">{t.common.noEventTaskActivity}</p> : <ol className="space-y-0">{activity.map((item, index) => <li key={item.id} className="relative flex gap-3 pb-4"><div className="relative flex w-8 shrink-0 justify-center"><span className="mt-1.5 h-2 w-2 rounded-full bg-accent/70" />{index < activity.length - 1 && <span className="absolute bottom-0 top-4 w-px bg-white/[0.08]" />}</div><div className="min-w-0 flex-1"><p className="text-sm leading-5 text-white/60">{item.actor && <span className="font-semibold text-white/80">{item.actor.name} </span>}{activityMessage(item, t)}</p><p className="mt-1 text-[11px] text-white/32">{formatCollaborationDate(item.createdAt, lang)}</p></div></li>)}</ol>}
+          {activity === null ? <CollaborationSkeleton /> : activity.length === 0 ? <p className="py-4 text-center text-sm text-white/38">{t.common.noEventTaskActivity}</p> : <ol className="space-y-0">{activity.map((item, index) => <li key={item.id} className="relative flex gap-3 pb-4"><div className="relative flex w-8 shrink-0 justify-center"><span className="mt-1.5 h-2 w-2 rounded-full bg-accent/70" />{index < activity.length - 1 && <span className="absolute bottom-0 top-4 w-px bg-white/[0.08]" />}</div><div className="min-w-0 flex-1"><p className="text-sm leading-5 text-white/60">{item.actor && <span className="mr-1 inline-flex items-center gap-1 font-semibold text-white/80">{item.actor.name}<IdentityVerificationBadge kind={identityVerificationForRole(item.actor.role)} size="xs" /></span>}{activityMessage(item, t)}</p><p className="mt-1 text-[11px] text-white/32">{formatCollaborationDate(item.createdAt, lang)}</p></div></li>)}</ol>}
         </div>
       ) : tab === 'attachments' ? (
         <div>

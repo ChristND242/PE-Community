@@ -24,6 +24,7 @@
     "@nestjs/platform-socket.io": "^11.2.1",
     "@nestjs/websockets": "^11.2.1",
     "@pe/shared": "workspace:*",
+    "@simplewebauthn/server": "13.3.3",
     "@prisma/client": "^6.1.0",
     "argon2": "^0.45.0",
     "bcryptjs": "^2.4.3",

@@ -4,10 +4,12 @@ import { Search } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AppSelect } from '../../../components/app-select';
+import { IdentityVerificationBadge } from '../../../components/identity-verification-badge';
 import { AppShell } from '../../../components/shell';
 import { ProfilePhoto } from '../../../components/profile-photo';
 import { Card, DataTablePagination, StatusBadge, TableEmptyState, TableErrorState, TableSkeleton } from '../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../lib/api';
+import { identityVerificationForRole } from '../../../lib/identity-verification';
 import { useI18n } from '../../../lib/i18n';
 import { userRoleLabel } from '../../../lib/user-role';
 import { formatDate } from '../../../lib/utils';
@@ -98,7 +100,7 @@ export default function MemberDirectoryPage() {
                       <div className="flex min-w-0 items-center gap-3">
                         <ProfilePhoto name={member.user.name} avatarUrl={member.profile?.avatarUrl} dicebearStyle={member.profile?.dicebearStyle} dicebearSeed={member.profile?.dicebearSeed} size="md" />
                         <div className="min-w-0">
-                        <h2 className="truncate text-base font-semibold text-white">{member.user.name}</h2>
+                        <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold text-white"><span className="truncate">{member.user.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(member.role.key)} size="sm" /></h2>
                         <p className="mt-1 truncate text-sm text-white/50">{member.profile?.title ?? member.profile?.location ?? member.user.email}</p>
                         </div>
                       </div>

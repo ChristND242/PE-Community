@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../../../components/shell';
+import { IdentityVerificationBadge } from '../../../../components/identity-verification-badge';
 import { ProfilePhoto } from '../../../../components/profile-photo';
 import { ProfileLinkDisplay } from '../../../../components/profile-link-display';
 import { TableErrorState, TableSkeleton } from '../../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../../lib/api';
+import { identityVerificationForRole } from '../../../../lib/identity-verification';
 import { useI18n } from '../../../../lib/i18n';
 import { userRoleLabel } from '../../../../lib/user-role';
 import { formatDate } from '../../../../lib/utils';
@@ -84,7 +86,7 @@ export default function MemberDetailPage() {
                   </span>
                 </div>
                 <div className="mt-4 min-w-0">
-                  <h1 id="member-profile-name" className="min-w-0 max-w-full break-words text-2xl font-semibold tracking-tight text-white sm:text-3xl">{member.user.name}</h1>
+                  <h1 id="member-profile-name" className="flex min-w-0 max-w-full items-center justify-center gap-2 break-words text-2xl font-semibold tracking-tight text-white sm:text-3xl"><span>{member.user.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(member.role.key)} size="md" /></h1>
                 </div>
                 {member.profile?.title && <p className="mx-auto mt-1.5 max-w-2xl text-sm leading-6 text-white/55">{member.profile.title}</p>}
                 <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-white/48">

@@ -4,10 +4,16 @@ import { Request } from 'express';
 import { maxAvatarUploadSize, type AvatarUploadFile } from '../uploads';
 import { AuthService } from './auth.service';
 import { ProfileLinksService } from '../profile-links/profile-links.service';
+import { StepUpService } from './step-up.service';
+import { auditRequestContext } from './auth-http';
 
 @Controller()
 export class MeController {
-  constructor(private readonly auth: AuthService, private readonly profileLinks: ProfileLinksService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly profileLinks: ProfileLinksService,
+    private readonly stepUp: StepUpService,
+  ) {}
 
   @Get('me')
   async me(@Req() req: Request) {
@@ -97,24 +103,28 @@ export class MeController {
   @Post('me/2fa/setup')
   async setupTwoFactor(@Req() req: Request) {
     const user = await this.auth.userFromCookie(req.cookies?.[this.auth.cookieName]);
+    await this.stepUp.requireRecent(user);
     return this.auth.setupTwoFactor(user.id, user.communityId);
   }
 
   @Post('me/2fa/verify')
   async verifyTwoFactor(@Req() req: Request, @Body() body: { code?: string }) {
     const user = await this.auth.userFromCookie(req.cookies?.[this.auth.cookieName]);
-    return this.auth.verifyTwoFactorSetup(user.id, body.code);
+    await this.stepUp.requireRecent(user);
+    return this.auth.verifyTwoFactorSetup(user.id, body.code, user.communityId, auditRequestContext(req));
   }
 
   @Post('me/2fa/disable')
   async disableTwoFactor(@Req() req: Request, @Body() body: Record<string, unknown>) {
     const user = await this.auth.userFromCookie(req.cookies?.[this.auth.cookieName]);
-    return this.auth.disableTwoFactor(user.id, body);
+    await this.stepUp.requireRecent(user);
+    return this.auth.disableTwoFactor(user.id, body, user.communityId, auditRequestContext(req));
   }
 
   @Post('me/2fa/backup-codes/regenerate')
   async regenerateBackupCodes(@Req() req: Request, @Body() body: Record<string, unknown>) {
     const user = await this.auth.userFromCookie(req.cookies?.[this.auth.cookieName]);
-    return this.auth.regenerateBackupCodes(user.id, user.communityId, body);
+    await this.stepUp.requireRecent(user);
+    return this.auth.regenerateBackupCodes(user.id, user.communityId, body, auditRequestContext(req));
   }
 }

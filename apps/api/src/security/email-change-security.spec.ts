@@ -29,8 +29,8 @@ function harness(passwordValid = true) {
     user: { id: 'user-1', email: 'old@example.test', name: 'Member', passwordHash: 'stored-hash' },
     requests: [] as RequestRow[],
     sessions: [
-      { tokenHash: 'current-session', userId: 'user-1' },
-      { tokenHash: 'other-session', userId: 'user-1' },
+      { id: 'session-current', tokenHash: 'current-session', userId: 'user-1' },
+      { id: 'session-other', tokenHash: 'other-session', userId: 'user-1' },
     ],
     audits: [] as Array<{ action: string }>,
     verificationTokens: [] as string[],
@@ -99,6 +99,9 @@ function harness(passwordValid = true) {
       },
     },
     session: {
+      findUnique: async ({ where }: { where: { tokenHash: string } }) => (
+        state.sessions.find((session) => session.tokenHash === where.tokenHash) ?? null
+      ),
       deleteMany: async ({ where }: { where: { userId: string; tokenHash: { not: string } } }) => {
         const before = state.sessions.length;
         state.sessions = state.sessions.filter((session) => (
@@ -137,6 +140,7 @@ function harness(passwordValid = true) {
     { verifyWithoutUpgrade: async () => passwordValid } as never,
     email as never,
     { reserve: async () => undefined } as never,
+    { recordBestEffort: async () => null } as never,
   );
   return { service, state };
 }
@@ -188,7 +192,7 @@ test('new request invalidates the previous token and valid verification updates 
   const result = await service.verify('user-1', 'community-1', secondToken, 'current-session');
 
   assert.equal(result.email, 'second@example.test');
-  assert.deepEqual(state.sessions, [{ tokenHash: 'current-session', userId: 'user-1' }]);
+  assert.deepEqual(state.sessions, [{ id: 'session-current', tokenHash: 'current-session', userId: 'user-1' }]);
   assert.equal(state.queuedCompletions, 1);
   assert.equal(state.audits.at(-1)?.action, 'account.email_changed');
 });

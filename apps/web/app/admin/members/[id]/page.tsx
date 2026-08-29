@@ -6,15 +6,18 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { AppShell } from '../../../../components/shell';
+import { IdentityVerificationBadge } from '../../../../components/identity-verification-badge';
 import { ProfilePhoto } from '../../../../components/profile-photo';
 import { ProfileSocialLinks } from '../../../../components/profile-social-links';
 import { Card, ConfirmDialog, LoadingButton, StatusBadge, TableErrorState, TableSkeleton } from '../../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../../lib/api';
+import { identityVerificationForRole } from '../../../../lib/identity-verification';
 import { statusLabel, useI18n } from '../../../../lib/i18n';
 import { PERMISSIONS, hasPermission } from '../../../../lib/permissions';
 import { userRoleLabel } from '../../../../lib/user-role';
 import { cn, formatDate } from '../../../../lib/utils';
 import type { ProfileLinkDto } from '../../../../lib/profile-links';
+import { isStepUpCancellation, useStepUpAuthentication } from '../../../../components/step-up-authentication-dialog';
 
 type Member = {
   id: string;
@@ -57,6 +60,7 @@ export default function AdminMemberDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { lang, t } = useI18n();
+  const stepUp = useStepUpAuthentication();
   const [member, setMember] = useState<Member | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -155,13 +159,14 @@ export default function AdminMemberDetailPage() {
     if (!form || savingRole || !roleChanged) return;
     setSavingRole(true);
     try {
-      const updated = await apiFetch<Member>(`/admin/${COMMUNITY_ID}/members/${id}/role`, {
+      const updated = await stepUp.run(() => apiFetch<Member>(`/admin/${COMMUNITY_ID}/members/${id}/role`, {
         method: 'PATCH',
         body: JSON.stringify({ roleKey: form.roleKey }),
-      });
+      }));
       setMember(updated);
       toast.success(t.admin.roleUpdated);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.admin.roleUpdateFailed);
     } finally {
       setSavingRole(false);
@@ -172,10 +177,10 @@ export default function AdminMemberDetailPage() {
     if (!confirming || confirmLoading) return;
     setConfirmLoading(true);
     try {
-      const updated = await apiFetch<Member>(`/admin/${COMMUNITY_ID}/members/${id}/${confirming === 'remove' ? 'remove' : 'suspend'}`, {
+      const updated = await stepUp.run(() => apiFetch<Member>(`/admin/${COMMUNITY_ID}/members/${id}/${confirming === 'remove' ? 'remove' : 'suspend'}`, {
         method: 'PATCH',
         body: confirming === 'remove' ? undefined : JSON.stringify({ status: confirming === 'reactivate' ? 'ACTIVE' : 'SUSPENDED' }),
-      });
+      }));
       if (confirming === 'remove') {
         router.push('/admin/members');
         return;
@@ -183,7 +188,8 @@ export default function AdminMemberDetailPage() {
       setMember(updated);
       toast.success(confirming === 'reactivate' ? t.admin.memberReactivated : t.admin.memberSuspended);
       setConfirming(null);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(confirming === 'remove' ? t.admin.removeFailed : confirming === 'reactivate' ? t.admin.reactivateFailed : t.admin.suspendFailed);
     } finally {
       setConfirmLoading(false);
@@ -197,15 +203,16 @@ export default function AdminMemberDetailPage() {
     }
     setResettingPassword(true);
     try {
-      await apiFetch(`/admin/${COMMUNITY_ID}/members/${id}/reset-password`, {
+      await stepUp.run(() => apiFetch(`/admin/${COMMUNITY_ID}/members/${id}/reset-password`, {
         method: 'PATCH',
         body: JSON.stringify({ temporaryPassword, forcePasswordChange }),
-      });
+      }));
       toast.success(t.admin.passwordResetSuccess);
       setTemporaryPassword('');
       setForcePasswordChange(true);
       setConfirmingPasswordReset(false);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.admin.passwordResetFailed);
     } finally {
       setResettingPassword(false);
@@ -216,11 +223,12 @@ export default function AdminMemberDetailPage() {
     if (resettingTwoFactor || !canResetTwoFactor) return;
     setResettingTwoFactor(true);
     try {
-      const updated = await apiFetch<Member>(`/admin/${COMMUNITY_ID}/members/${id}/2fa/reset`, { method: 'POST' });
+      const updated = await stepUp.run(() => apiFetch<Member>(`/admin/${COMMUNITY_ID}/members/${id}/2fa/reset`, { method: 'POST' }));
       setMember(updated);
       toast.success(t.admin.twoFactorResetSuccess);
       setConfirmingTwoFactorReset(false);
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.admin.twoFactorResetFailed);
     } finally {
       setResettingTwoFactor(false);
@@ -251,7 +259,7 @@ export default function AdminMemberDetailPage() {
                 <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
                   <ProfilePhoto name={member.user.name} avatarUrl={form.avatarUrl} dicebearStyle={member.profile?.dicebearStyle} dicebearSeed={member.profile?.dicebearSeed} size="lg" />
                   <div className="min-w-0">
-                    <h1 className="truncate text-2xl font-semibold tracking-tight text-white md:text-3xl">{member.user.name}</h1>
+                    <h1 className="flex min-w-0 items-center gap-2 text-2xl font-semibold tracking-tight text-white md:text-3xl"><span className="truncate">{member.user.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(member.role.key)} size="md" /></h1>
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/55">
                       <span className="inline-flex items-center gap-2"><Mail size={15} />{member.user.email}</span>
                       <span className="inline-flex items-center gap-2"><CalendarDays size={15} />{t.admin.memberSinceLabel} {memberSince}</span>
@@ -420,6 +428,7 @@ export default function AdminMemberDetailPage() {
         <ConfirmDialog open={Boolean(confirming)} title={confirmTitle} description={confirmDescription} confirmLabel={confirmLabel} cancelLabel={t.common.cancel} loading={confirmLoading} onConfirm={confirmAction} onCancel={() => setConfirming(null)} />
         <ConfirmDialog open={confirmingPasswordReset} title={t.admin.resetPasswordConfirmTitle} description={t.admin.resetPasswordConfirmDescription} confirmLabel={t.admin.resetPassword} cancelLabel={t.common.cancel} loading={resettingPassword} onConfirm={resetPassword} onCancel={() => setConfirmingPasswordReset(false)} />
         <ConfirmDialog open={confirmingTwoFactorReset} title={t.admin.twoFactorResetConfirmTitle} description={t.admin.twoFactorResetConfirmDescription} confirmLabel={t.admin.confirmReset} cancelLabel={t.common.cancel} loading={resettingTwoFactor} onConfirm={resetTwoFactor} onCancel={() => setConfirmingTwoFactorReset(false)} />
+        {stepUp.dialog}
       </div>
     </AppShell>
   );

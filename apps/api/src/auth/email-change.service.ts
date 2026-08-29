@@ -4,7 +4,10 @@ import { createHash, randomBytes } from 'crypto';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PasswordService } from '../security/password.service';
+import type { AuditRequestContext } from '../audit/audit-log.service';
 import { EmailChangeRateLimitService } from './email-change-rate-limit.service';
+import { SecurityActivityService } from './security-activity.service';
+import { realtimeSessionRegistry } from './realtime-session-registry';
 
 export const EMAIL_CHANGE_EXPIRES_MINUTES = 45;
 const emailUnavailableResponse = { code: 'EMAIL_UNAVAILABLE', message: 'This email address cannot be used.' };
@@ -17,6 +20,7 @@ export class EmailChangeService {
     private readonly passwords: PasswordService,
     private readonly email: EmailService,
     private readonly rateLimits: EmailChangeRateLimitService,
+    private readonly securityActivity: SecurityActivityService,
   ) {}
 
   async status(userId: string) {
@@ -164,7 +168,6 @@ export class EmailChangeService {
       await this.auditFailure(communityId, userId, 'RATE_LIMITED');
       throw error;
     }
-
     const token = createEmailChangeToken();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + EMAIL_CHANGE_EXPIRES_MINUTES * 60 * 1000);
@@ -294,7 +297,13 @@ export class EmailChangeService {
     return { ok: true };
   }
 
-  async verify(userId: string, communityId: string, rawToken: unknown, currentSessionTokenHash: string) {
+  async verify(
+    userId: string,
+    communityId: string,
+    rawToken: unknown,
+    currentSessionTokenHash: string,
+    requestContext?: AuditRequestContext,
+  ) {
     const token = requiredString(rawToken);
     if (!token || token.length > 256) throw new BadRequestException(invalidTokenMessage);
     const request = await this.prisma.emailChangeRequest.findUnique({
@@ -305,6 +314,10 @@ export class EmailChangeService {
     }
 
     const now = new Date();
+    const currentSession = await this.prisma.session.findUnique({
+      where: { tokenHash: currentSessionTokenHash },
+      select: { id: true },
+    });
     let result: { oldEmail: string; newEmail: string; userName: string; revokedSessionCount: number };
     try {
       result = await this.prisma.$transaction(async (tx) => {
@@ -361,6 +374,7 @@ export class EmailChangeService {
       if (isUniqueConstraintError(error)) throw new ConflictException(emailUnavailableResponse);
       throw error;
     }
+    realtimeSessionRegistry.revokeUser(userId, currentSession?.id);
 
     try {
       await this.email.queueEmailChangeCompleted(
@@ -372,6 +386,14 @@ export class EmailChangeService {
     } catch {
       await this.auditFailure(communityId, userId, 'COMPLETION_NOTIFICATION_FAILED').catch(() => undefined);
     }
+    await this.securityActivity.recordBestEffort({
+      communityId,
+      userId,
+      eventType: 'EMAIL_CHANGED',
+      context: requestContext,
+      notify: true,
+      notificationEmail: result.oldEmail,
+    });
     return {
       ok: true,
       email: result.newEmail,

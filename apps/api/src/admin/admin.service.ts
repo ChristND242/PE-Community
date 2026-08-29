@@ -1,7 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { EmailLocale, EMAIL_LOCALES, LocalizedEmailTemplate, evaluateAutomationExecution, normalizeEmailLocale, renderTemplateEmail, type AutomationSkipReason } from '@pe/shared';
 import { AnnouncementAuthorMode, AnnouncementStatus, EventTaskActivityType, EventTaskPriority, EventTaskStatus, NotificationTemplateKey, Prisma, TaskBoardAutomationRuleChangeType, TaskBoardAutomationRuleType, TaskBoardStatus } from '@prisma/client';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
+import { mkdir, unlink, writeFile } from 'fs/promises';
+import { basename, join } from 'path';
 import { defaultDicebearProfile, profileData, stringValue } from '../auth/auth.service';
 import { EmailChangeService } from '../auth/email-change.service';
 import { profileLinkDtoSelect, safeProfileLinkResponses } from '../profile-links/profile-links.service';
@@ -13,11 +15,14 @@ import { editableTemplateRequiredVariables, emailTemplatePreviewContext, emailTe
 import { allowedNotificationTemplatePlaceholders, automationNotificationTemplateDefinitions, brandedAutomationEmail, ensureAutomationNotificationTemplates, notificationTemplateDefinition, renderNotificationTemplate, sampleTemplateVariables, templateChannelScope, templateContentChanged, validateNotificationTemplatePlaceholders } from '../notification-templates';
 import { PrismaService } from '../prisma/prisma.service';
 import { PasswordService } from '../security/password.service';
+import { realtimeSessionRegistry } from '../auth/realtime-session-registry';
 import { RegistrationSettingsService } from '../registration/registration-settings.service';
 import { buildTaskBoardOverview } from '../task-board-overview';
 import { dateInPeriod } from '../period-analytics';
 import { parseTaskBoardAutomationRange, taskBoardAutomationComparison, taskBoardAutomationPeriod, taskBoardAutomationSparkline, type TaskBoardAutomationPeriod } from '../task-board-automation-analytics';
 import { ALL_PERMISSIONS, PERMISSION_GROUPS, ROLE_HIERARCHY, SystemRole, normalizeSystemRole } from '../rbac/permissions';
+import { publicationCoverMutation, type PublicationCoverMutation } from '../publication-covers';
+import { publicationCoverPublicUrl, publicationCoverUploadDir, type PublicationCoverUploadFile } from '../uploads';
 
 const eventTaskInclude = Prisma.validator<Prisma.EventTaskInclude>()({
   assignee: {
@@ -1669,47 +1674,61 @@ export class AdminService {
     return announcement;
   }
 
-  async createAnnouncement(communityId: string, actorUserId: string, input: Record<string, unknown>) {
+  async createAnnouncement(communityId: string, actorUserId: string, input: Record<string, unknown>, coverImage?: PublicationCoverUploadFile) {
     const data = announcementData(input);
     const authorMode = announcementAuthorMode(input.authorMode);
     if (authorMode === AnnouncementAuthorMode.COMMUNITY_TEAM) await this.requireAnnouncementCommunityTeamAuthor(communityId, actorUserId);
     const publishNow = Boolean(input.publish);
-    const announcement = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.announcement.create({
-        data: {
-          communityId,
-          ...data,
-          authorMode,
-          status: publishNow ? 'PUBLISHED' : 'DRAFT',
-          publishedAt: publishNow ? new Date() : null,
-        },
+    const cover = await preparePublicationCover(publicationCoverMutation(input, coverImage));
+    try {
+      const announcement = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.announcement.create({
+          data: {
+            communityId,
+            ...data,
+            ...cover.data,
+            authorMode,
+            status: publishNow ? 'PUBLISHED' : 'DRAFT',
+            publishedAt: publishNow ? new Date() : null,
+          },
+        });
+        await tx.auditLog.create({
+          data: { communityId, actorUserId, action: publishNow ? 'announcement.published' : 'announcement.created', targetType: 'Announcement', targetId: created.id, metadata: { title: created.title } },
+        });
+        return created;
       });
-      await tx.auditLog.create({
-        data: { communityId, actorUserId, action: publishNow ? 'announcement.published' : 'announcement.created', targetType: 'Announcement', targetId: created.id, metadata: { title: created.title } },
-      });
-      return created;
-    });
-    if (publishNow) {
-      await this.notifyAnnouncementPublished(communityId, announcement.id, announcement.title, announcement.body);
-      if (booleanValue(input.emailActiveMembers)) await this.email.queueAnnouncementBroadcast(communityId, actorUserId, announcement);
+      if (publishNow) {
+        await this.notifyAnnouncementPublished(communityId, announcement.id, announcement.title, announcement.body);
+        if (booleanValue(input.emailActiveMembers)) await this.email.queueAnnouncementBroadcast(communityId, actorUserId, announcement);
+      }
+      return announcement;
+    } catch (error) {
+      if (cover.uploadedPath) await unlink(cover.uploadedPath).catch(() => undefined);
+      throw error;
     }
-    return announcement;
   }
 
-  async updateAnnouncement(communityId: string, announcementId: string, actorUserId: string, input: Record<string, unknown>) {
+  async updateAnnouncement(communityId: string, announcementId: string, actorUserId: string, input: Record<string, unknown>, coverImage?: PublicationCoverUploadFile) {
     const existing = await this.prisma.announcement.findFirst({ where: { id: announcementId, communityId, deletedAt: null } });
     if (!existing) throw new NotFoundException('Announcement not found.');
     const data = announcementData(input);
     const authorMode = input.authorMode === undefined ? existing.authorMode : announcementAuthorMode(input.authorMode);
     if (authorMode === AnnouncementAuthorMode.COMMUNITY_TEAM) await this.requireAnnouncementCommunityTeamAuthor(communityId, actorUserId);
-    const announcement = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.announcement.update({ where: { id: existing.id }, data: { ...data, authorMode } });
-      await tx.auditLog.create({
-        data: { communityId, actorUserId, action: 'announcement.updated', targetType: 'Announcement', targetId: updated.id, metadata: { title: updated.title } },
+    const cover = await preparePublicationCover(publicationCoverMutation(input, coverImage, true));
+    try {
+      const announcement = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.announcement.update({ where: { id: existing.id }, data: { ...data, ...cover.data, authorMode } });
+        await tx.auditLog.create({
+          data: { communityId, actorUserId, action: 'announcement.updated', targetType: 'Announcement', targetId: updated.id, metadata: { title: updated.title } },
+        });
+        return updated;
       });
-      return updated;
-    });
-    return announcement;
+      if (cover.replacesExisting) await removeUploadedPublicationCover(existing.coverUrl, existing.coverSource);
+      return announcement;
+    } catch (error) {
+      if (cover.uploadedPath) await unlink(cover.uploadedPath).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async requireAnnouncementCommunityTeamAuthor(communityId: string, actorUserId: string) {
@@ -1836,6 +1855,7 @@ export class AdminService {
       });
       return updated;
     });
+    await removeUploadedPublicationCover(existing.coverUrl, existing.coverSource);
     return { deleted: true, id: announcement.id };
   }
 
@@ -3041,6 +3061,7 @@ export class AdminService {
         },
       });
     });
+    realtimeSessionRegistry.revokeUser(membership.userId);
     return { ok: true, forcePasswordChange };
   }
 
@@ -3068,6 +3089,7 @@ export class AdminService {
         },
       });
     });
+    realtimeSessionRegistry.revokeUser(membership.userId);
     return this.member(communityId, memberId);
   }
 
@@ -3127,6 +3149,7 @@ export class AdminService {
         },
       });
     });
+    if (nextStatus === 'SUSPENDED') realtimeSessionRegistry.revokeUser(member.userId);
     return this.member(communityId, memberId);
   }
 
@@ -3149,6 +3172,7 @@ export class AdminService {
       await tx.memberProfile.deleteMany({ where: { membershipId: member.id } });
       await tx.membership.delete({ where: { id: member.id } });
     });
+    realtimeSessionRegistry.revokeUser(member.userId);
     return { removed: true, id: member.id };
   }
 
@@ -3188,6 +3212,7 @@ export class AdminService {
         });
       }
     });
+    realtimeSessionRegistry.revokeUser(member.userId);
     return this.member(communityId, memberId);
   }
 
@@ -4602,6 +4627,41 @@ function eventData(input: Record<string, unknown>) {
     onlineUrl: stringValue(input.onlineUrl),
     capacity: Number.isFinite(capacityValue) && capacityValue > 0 ? Math.floor(capacityValue) : null,
   };
+}
+
+type PreparedPublicationCover = {
+  data: { coverUrl?: string | null; coverSource?: 'UPLOAD' | 'EXTERNAL' | null };
+  uploadedPath?: string;
+  replacesExisting: boolean;
+};
+
+async function preparePublicationCover(mutation: PublicationCoverMutation): Promise<PreparedPublicationCover> {
+  if (mutation.action === 'keep') return { data: {}, replacesExisting: false };
+  if (mutation.action === 'clear') return { data: { coverUrl: null, coverSource: null }, replacesExisting: true };
+  if (mutation.action === 'external') {
+    return { data: { coverUrl: mutation.coverUrl, coverSource: mutation.coverSource }, replacesExisting: true };
+  }
+  const filename = `${randomUUID()}${mutation.extension}`;
+  const uploadDir = publicationCoverUploadDir();
+  const uploadedPath = join(uploadDir, filename);
+  await mkdir(uploadDir, { recursive: true });
+  await writeFile(uploadedPath, mutation.file.buffer);
+  return {
+    data: { coverUrl: publicationCoverPublicUrl(filename), coverSource: mutation.coverSource },
+    uploadedPath,
+    replacesExisting: true,
+  };
+}
+
+async function removeUploadedPublicationCover(coverUrl: string | null | undefined, coverSource: string | null | undefined) {
+  if (!coverUrl || coverSource !== 'UPLOAD') return;
+  try {
+    const filename = basename(new URL(coverUrl).pathname);
+    if (!/^[0-9a-f-]+\.(?:jpg|png|webp)$/i.test(filename)) return;
+    await unlink(join(publicationCoverUploadDir(), filename)).catch(() => undefined);
+  } catch {
+    // Malformed legacy metadata never becomes a filesystem path.
+  }
 }
 
 function announcementData(input: Record<string, unknown>) {

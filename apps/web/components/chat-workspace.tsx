@@ -13,8 +13,10 @@ import { CHAT_ATTACHMENT_ENCRYPTION_ALGORITHM, CHAT_ENCRYPTION_ALGORITHM, decryp
 import { commitStagedLocalChatKey, getLocalChatDeviceIdentity, getLocalChatKeyRing, promoteRetainedLocalChatKey, reconcileLocalChatKeys, restoreLocalChatKeyState, snapshotLocalChatKeyState, stageGeneratedLocalChatKey, stageLocalChatKey, storeHistoricalLocalChatKey, type LocalChatDeviceIdentity, type LocalChatKeyPair } from '../lib/chat-key-store';
 import { ApiRequestError, apiFetch, apiUrl } from '../lib/api';
 import { detectClientDeviceInfo } from '../lib/chat-device-info';
+import { identityVerificationForRole } from '../lib/identity-verification';
 import { useI18n } from '../lib/i18n';
 import { userRoleLabel } from '../lib/user-role';
+import { IdentityVerificationBadge } from './identity-verification-badge';
 import { ProfilePhoto } from './profile-photo';
 import { Button, ConfirmDialog, Spinner, TableEmptyState, TableErrorState } from './ui';
 
@@ -200,6 +202,7 @@ type ChatGroupParticipant = {
   name: string;
   email: string;
   role: 'OWNER' | 'MEMBER' | string;
+  workspaceRole?: string | null;
   title?: string | null;
   avatarUrl?: string | null;
   dicebearStyle?: string | null;
@@ -3015,7 +3018,10 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
               <ConversationAvatar conversation={conversation} participant={recipient} fallback={label} size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">
-                  <p className={`truncate text-sm font-semibold ${unread > 0 ? 'text-white' : 'text-white/88'}`}>{label}</p>
+                  <span className={`flex min-w-0 items-center gap-1.5 text-sm font-semibold ${unread > 0 ? 'text-white' : 'text-white/88'}`}>
+                    <span className="truncate">{label}</span>
+                    {!isGroupConversation(conversation) && <IdentityVerificationBadge kind={identityVerificationForRole(recipient?.role)} size="xs" />}
+                  </span>
                   {unread > 0 && <span className="grid min-h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-black text-[#04100b]">{unread > 99 ? '99+' : unread}</span>}
                 </div>
                 <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
@@ -3211,7 +3217,10 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
                       : <ConversationAvatar conversation={selectedConversation} participant={selectedRecipient} fallback={selectedConversationLabel} size="md" />
                   )}
                   <div className="min-w-0">
-                    <p className="truncate text-base font-semibold text-white">{selectedConversationLabel}</p>
+                    <p className="flex min-w-0 items-center gap-1.5 text-base font-semibold text-white">
+                      <span className="truncate">{selectedConversationLabel}</span>
+                      {selectedRecipient && !isGroupConversation(selectedConversation) && <IdentityVerificationBadge kind={identityVerificationForRole(selectedRecipient.role)} size="sm" />}
+                    </p>
                     {selectedConversation && (selectedRecipient || isGroupConversation(selectedConversation)) && (
                       <p className={`mt-1 text-xs ${selectedTypingLabel ? 'font-medium text-accent' : 'text-white/42'}`}>{selectedStatusLabel}</p>
                     )}
@@ -5442,7 +5451,7 @@ function ParticipantPickerModal({
                       <ProfilePhoto name={participant.name} avatarUrl={participant.avatarUrl} dicebearStyle={participant.dicebearStyle} dicebearSeed={participant.dicebearSeed} size="sm" className="h-10 w-10 rounded-full border-emerald-300/15 bg-emerald-300/10 text-xs text-emerald-100" />
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <p className="truncate text-sm font-semibold text-white">{participant.name}</p>
+                          <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{participant.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(participant.role)} size="xs" /></p>
                           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] font-semibold uppercase text-white/48">{userRoleLabel(t, participant.role)}</span>
                         </div>
                         <p className="mt-1 truncate text-xs text-white/45">{participant.email}</p>
@@ -5564,7 +5573,7 @@ function GroupCreationModal({
                       <ProfilePhoto name={participant.name} avatarUrl={participant.avatarUrl} dicebearStyle={participant.dicebearStyle} dicebearSeed={participant.dicebearSeed} size="sm" className="rounded-full border-emerald-300/15 bg-emerald-300/10 text-xs text-emerald-100" />
                       <span className="min-w-0 flex-1">
                         <span className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-white">{participant.name}</span>
+                          <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{participant.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(participant.role)} size="xs" /></span>
                           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] font-semibold uppercase text-white/48">{userRoleLabel(t, participant.role)}</span>
                         </span>
                         <span className={`mt-1 block text-xs font-medium ${participant.hasChatKey ? 'text-emerald-100' : 'text-amber-100'}`}>
@@ -5597,6 +5606,7 @@ function GroupCreationModal({
                   <span key={participant.userId} className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] py-1 pl-1 pr-3 text-xs font-medium text-white/72">
                     <ProfilePhoto name={participant.name} avatarUrl={participant.avatarUrl} dicebearStyle={participant.dicebearStyle} dicebearSeed={participant.dicebearSeed} size="sm" className="h-6 w-6 rounded-full text-[10px]" />
                     <span className="truncate">{participant.name}</span>
+                    <IdentityVerificationBadge kind={identityVerificationForRole(participant.role)} size="xs" />
                   </span>
                 ))}
               </div>
@@ -5894,7 +5904,7 @@ function GroupMembersPanel({
                           <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border text-[11px] font-black ${selected ? 'border-accent/40 bg-accent text-[#04100b]' : 'border-white/15 bg-black/20 text-transparent'}`}>✓</span>
                           <ProfilePhoto name={participant.name} avatarUrl={participant.avatarUrl} dicebearStyle={participant.dicebearStyle} dicebearSeed={participant.dicebearSeed} size="sm" className="h-9 w-9 rounded-full border-emerald-300/15 bg-emerald-300/10 text-xs text-emerald-100" />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-white">{participant.name}</span>
+                            <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-white"><span className="truncate">{participant.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(participant.role)} size="xs" /></span>
                             <span className="mt-0.5 block truncate text-xs text-white/45">{participant.email}</span>
                           </span>
                         </button>
@@ -5965,7 +5975,7 @@ function GroupMembersPanel({
                         <div key={participant.userId} className="flex min-w-0 items-center gap-3 px-2 py-3 transition hover:bg-white/[0.035]">
                           <ProfilePhoto name={participant.name} avatarUrl={participant.avatarUrl} dicebearStyle={participant.dicebearStyle} dicebearSeed={participant.dicebearSeed} size="sm" className="h-10 w-10 rounded-full border-emerald-300/15 bg-emerald-300/10 text-xs text-emerald-100" />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-white">{isCurrentUser ? t.chat.you : participant.name}</p>
+                            <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-white"><span className="truncate">{isCurrentUser ? t.chat.you : participant.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(participant.workspaceRole)} size="xs" /></p>
                             <p className="mt-0.5 truncate text-xs text-white/45">{participant.email}</p>
                           </div>
                           {participantIsOwner && <span className="shrink-0 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-semibold text-white/65">{t.chat.groupAdmin}</span>}
@@ -6414,6 +6424,7 @@ function GroupOwnerCombobox({ participants, value, disabled, t, onChange }: { pa
           <span className="flex min-w-0 items-center gap-2">
             <ProfilePhoto name={selectedParticipant.name} avatarUrl={selectedParticipant.avatarUrl} dicebearStyle={selectedParticipant.dicebearStyle} dicebearSeed={selectedParticipant.dicebearSeed} size="sm" className="h-6 w-6 rounded-full border-emerald-300/15 bg-emerald-300/10 text-[10px] text-emerald-100" />
             <span className="truncate font-medium">{selectedParticipant.name}</span>
+            <IdentityVerificationBadge kind={identityVerificationForRole(selectedParticipant.workspaceRole)} size="xs" />
           </span>
         ) : (
           <span className="truncate text-white/42">{t.chat.selectNewOwner}</span>
@@ -6451,7 +6462,7 @@ function GroupOwnerCombobox({ participants, value, disabled, t, onChange }: { pa
               >
                 <ProfilePhoto name={participant.name} avatarUrl={participant.avatarUrl} dicebearStyle={participant.dicebearStyle} dicebearSeed={participant.dicebearSeed} size="sm" className="h-8 w-8 rounded-full border-emerald-300/15 bg-emerald-300/10 text-xs text-emerald-100" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-white">{participant.name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-white"><span className="truncate">{participant.name}</span><IdentityVerificationBadge kind={identityVerificationForRole(participant.workspaceRole)} size="xs" /></span>
                   <span className="mt-0.5 block truncate text-xs text-white/45">{participant.email}</span>
                 </span>
                 {value === participant.userId && <Check size={15} className="shrink-0 text-accent" />}

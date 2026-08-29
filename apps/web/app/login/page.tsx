@@ -4,12 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Copy, Download, KeyRound, ShieldCheck } from 'lucide-react';
+import { browserSupportsWebAuthn, startAuthentication, WebAuthnAbortService } from '@simplewebauthn/browser';
+import { Copy, Download, Fingerprint, KeyRound, ShieldCheck } from 'lucide-react';
 import { Card, GhostLink, LoadingButton } from '../../components/ui';
 import { AuthBackground } from '../../components/auth-background';
 import { AuthHeaderControls } from '../../components/auth-header-controls';
 import { apiUrl } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
+import {
+  browserSupportsConditionalPasskeyAuthentication,
+  isPasskeyAuthenticationCancellation,
+} from '../../lib/passkey-authentication';
 
 type MfaCodeType = 'authenticator' | 'backup';
 type TwoFactorSetup = { otpauthUrl: string; qrCodeDataUrl: string; setupKey: string };
@@ -21,6 +26,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [challengeToken, setChallengeToken] = useState('');
   const [mfaCodeType, setMfaCodeType] = useState<MfaCodeType>('authenticator');
   const [authenticatorCode, setAuthenticatorCode] = useState('');
@@ -32,6 +38,8 @@ export default function LoginPage() {
   const [reenrollmentBackupCodesSaved, setReenrollmentBackupCodesSaved] = useState(false);
   const [reenrollmentUser, setReenrollmentUser] = useState<LoginUser | null>(null);
   const [passwordResetAvailable, setPasswordResetAvailable] = useState(false);
+  const conditionalAuthenticationActiveRef = useRef(false);
+  const conditionalAuthenticationAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const search = new URLSearchParams(window.location.search);
@@ -43,8 +51,40 @@ export default function LoginPage() {
       .catch(() => setPasswordResetAvailable(false));
   }, [t.auth.sessionExpiredInactivity, t.setup.loginAfterSetup]);
 
+  useEffect(() => {
+    const authenticationAbort = new AbortController();
+    conditionalAuthenticationAbortRef.current = authenticationAbort;
+    conditionalAuthenticationActiveRef.current = true;
+
+    async function startConditionalAuthentication() {
+      let assertionSelected = false;
+      try {
+        if (!await browserSupportsConditionalPasskeyAuthentication()) return;
+        const authentication = await beginPasskeyAuthentication(true, authenticationAbort.signal);
+        assertionSelected = true;
+        if (!conditionalAuthenticationActiveRef.current) return;
+        await finishPasskeyAuthentication(
+          authentication.attemptId,
+          authentication.response,
+          authenticationAbort.signal,
+        );
+      } catch (caught) {
+        if (!conditionalAuthenticationActiveRef.current || isPasskeyAuthenticationCancellation(caught)) return;
+        if (assertionSelected) setError(t.security.passkeySignInFailed);
+      }
+    }
+
+    void startConditionalAuthentication();
+    return () => {
+      conditionalAuthenticationActiveRef.current = false;
+      authenticationAbort.abort();
+      WebAuthnAbortService.cancelCeremony();
+    };
+  }, []);
+
   async function submit(formData: FormData) {
     if (loading) return;
+    cancelConditionalAuthentication();
     setError('');
     setMessage('');
     const email = String(formData.get('email') ?? '').trim();
@@ -77,6 +117,67 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function signInWithPasskey() {
+    if (loading || passkeyLoading) return;
+    setError('');
+    setMessage('');
+    if (!browserSupportsWebAuthn()) {
+      setError(t.security.passkeysUnsupported);
+      return;
+    }
+    cancelConditionalAuthentication();
+    setPasskeyLoading(true);
+    try {
+      const authentication = await beginPasskeyAuthentication(false);
+      await finishPasskeyAuthentication(authentication.attemptId, authentication.response);
+    } catch (caught) {
+      setError(passkeyAuthenticationErrorLabel(
+        caught,
+        t.security.passkeySignInCancelled,
+        t.security.passkeySignInFailed,
+      ));
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }
+
+  async function beginPasskeyAuthentication(useBrowserAutofill: boolean, signal?: AbortSignal) {
+    const optionsResponse = await fetch(apiUrl('/auth/passkeys/authentication/options'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+    });
+    if (!optionsResponse.ok) throw new Error('options failed');
+    const { attemptId, options } = await optionsResponse.json();
+    if (signal?.aborted || (useBrowserAutofill && !conditionalAuthenticationActiveRef.current)) {
+      throw new DOMException('Passkey authentication cancelled.', 'AbortError');
+    }
+    const response = await startAuthentication({ optionsJSON: options, useBrowserAutofill });
+    return { attemptId, response };
+  }
+
+  async function finishPasskeyAuthentication(attemptId: string, response: unknown, signal?: AbortSignal) {
+    const verificationResponse = await fetch(apiUrl('/auth/passkeys/authentication/verify'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attemptId, response }),
+      signal,
+    });
+    if (!verificationResponse.ok) throw new Error('verification failed');
+    const { user } = await verificationResponse.json();
+    if (signal?.aborted || (signal && !conditionalAuthenticationActiveRef.current)) return;
+    applyCommunityDefaults(user?.community);
+    redirectAfterLogin(user);
+  }
+
+  function cancelConditionalAuthentication() {
+    conditionalAuthenticationActiveRef.current = false;
+    conditionalAuthenticationAbortRef.current?.abort();
+    WebAuthnAbortService.cancelCeremony();
   }
 
   async function startOwnerTwoFactorReenrollment(token = reenrollmentToken) {
@@ -261,17 +362,37 @@ export default function LoginPage() {
         </div>
       ) : (
         <form action={submit} className="space-y-4">
-          <Input name="email" label={t.common.email} />
-          <Input name="password" label={t.common.password} type="password" />
+          <Input name="email" label={t.common.email} autoComplete="username webauthn" />
+          <Input name="password" label={t.common.password} type="password" autoComplete="current-password" />
           {passwordResetAvailable && <Link href="/forgot-password" className="-mt-2 block text-right text-sm font-semibold text-accent transition hover:text-[#74e4b1]">{t.auth.forgotPassword}</Link>}
           {message && <p className="text-sm text-accent">{message}</p>}
           {error && <p className="text-sm text-rose-300">{error}</p>}
           <LoadingButton loading={loading} loadingLabel={t.auth.loggingIn} className="w-full">{t.auth.login}</LoadingButton>
+          <div className="flex items-center gap-3 py-1" aria-hidden="true">
+            <span className="h-px flex-1 bg-white/10" />
+            <span className="text-xs font-medium text-white/40">{t.auth.orContinueWith}</span>
+            <span className="h-px flex-1 bg-white/10" />
+          </div>
+          <LoadingButton
+            type="button"
+            loading={passkeyLoading}
+            loadingLabel={t.security.signingInWithPasskey}
+            disabled={loading}
+            onClick={signInWithPasskey}
+            className="w-full border border-white/12 bg-white/[0.055] text-white hover:bg-white/[0.09]"
+          >
+            <Fingerprint size={17} aria-hidden="true" />
+            {t.security.signInWithPasskey}
+          </LoadingButton>
           <GhostLink className="block text-center" href="/register">{t.auth.register}</GhostLink>
         </form>
       )}
     </AuthFrame>
   );
+}
+
+function passkeyAuthenticationErrorLabel(error: unknown, cancellation: string, fallback: string) {
+  return isPasskeyAuthenticationCancellation(error) ? cancellation : fallback;
 }
 
 function MfaCodeTypeSelector({ value, onChange, label, authenticatorLabel, backupLabel, className }: { value: MfaCodeType; onChange: (value: MfaCodeType) => void; label: string; authenticatorLabel: string; backupLabel: string; className: string }) {
@@ -412,6 +533,6 @@ function AuthFrame({ title, children, compact = false, sideControl }: { title: s
 
   return <AuthBackground><Card className="w-full max-w-md"><div className="mb-8 flex items-start justify-between gap-4"><h1 className="text-2xl font-black">{title}</h1><AuthHeaderControls /></div>{children}</Card></AuthBackground>;
 }
-function Input(props: { label: string; name: string; type?: string; defaultValue?: string }) {
-  return <label className="block text-sm text-white/70">{props.label}<input required name={props.name} type={props.type ?? 'text'} defaultValue={props.defaultValue} className="mt-2 w-full rounded-lg border border-white/10 bg-black/25 px-3 py-3 text-white outline-none focus:border-accent" /></label>;
+function Input(props: { label: string; name: string; type?: string; defaultValue?: string; autoComplete?: string }) {
+  return <label className="block text-sm text-white/70">{props.label}<input required name={props.name} type={props.type ?? 'text'} defaultValue={props.defaultValue} autoComplete={props.autoComplete} className="mt-2 w-full rounded-lg border border-white/10 bg-black/25 px-3 py-3 text-white outline-none focus:border-accent" /></label>;
 }

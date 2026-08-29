@@ -10,7 +10,15 @@ import { LoginStreakService } from './login-streak.service';
 import { EmailChangeRateLimitService } from './email-change-rate-limit.service';
 import { EmailChangeService } from './email-change.service';
 import { ProfileLinksModule } from '../profile-links/profile-links.module';
-import { loadJwtSecret } from '../security/jwt-secret';
+import Redis from 'ioredis';
+import { PasskeyController } from './passkey.controller';
+import { PASSKEY_REDIS, PasskeyChallengeService } from './passkey-challenge.service';
+import { PasskeyService } from './passkey.service';
+import { StepUpController } from './step-up.controller';
+import { StepUpService } from './step-up.service';
+import { SecurityActivityController } from './security-activity.controller';
+import { SecurityActivityService } from './security-activity.service';
+import { loadJwtSecret } from './auth-security-config';
 
 @Module({
   imports: [
@@ -23,8 +31,24 @@ import { loadJwtSecret } from '../security/jwt-secret';
       signOptions: { expiresIn: '7d' },
     }),
   ],
-  controllers: [AuthController, MeController],
-  providers: [AuthService, LoginStreakService, EmailChangeService, EmailChangeRateLimitService],
-  exports: [AuthService, LoginStreakService, EmailChangeService],
+  controllers: [AuthController, MeController, PasskeyController, StepUpController, SecurityActivityController],
+  providers: [
+    AuthService,
+    LoginStreakService,
+    EmailChangeService,
+    EmailChangeRateLimitService,
+    PasskeyService,
+    PasskeyChallengeService,
+    StepUpService,
+    SecurityActivityService,
+    {
+      provide: PASSKEY_REDIS,
+      useFactory: () => new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
+        maxRetriesPerRequest: 1,
+        connectTimeout: 3_000,
+      }),
+    },
+  ],
+  exports: [AuthService, LoginStreakService, EmailChangeService, StepUpService, SecurityActivityService],
 })
 export class AuthModule {}

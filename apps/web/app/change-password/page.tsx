@@ -6,12 +6,14 @@ import { toast } from 'sonner';
 import { Card, LoadingButton } from '../../components/ui';
 import { AuthBackground } from '../../components/auth-background';
 import { AuthHeaderControls } from '../../components/auth-header-controls';
-import { apiUrl } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
+import { isStepUpCancellation, useStepUpAuthentication } from '../../components/step-up-authentication-dialog';
 
 export default function ChangePasswordPage() {
   const { t } = useI18n();
   const router = useRouter();
+  const stepUp = useStepUpAuthentication();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,19 +27,14 @@ export default function ChangePasswordPage() {
     }
     setLoading(true);
     try {
-      const response = await fetch(apiUrl('/auth/change-required-password'), {
+      await stepUp.run(() => apiFetch('/auth/change-required-password', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword }),
-      });
-      if (!response.ok) {
-        toast.error(t.security.passwordChangeFailed);
-        return;
-      }
+      }));
       toast.success(t.security.passwordChanged);
       router.push('/dashboard');
-    } catch {
+    } catch (error) {
+      if (isStepUpCancellation(error)) return;
       toast.error(t.security.passwordChangeFailed);
     } finally {
       setLoading(false);
@@ -61,6 +58,7 @@ export default function ChangePasswordPage() {
           <LoadingButton loading={loading} loadingLabel={t.security.changingPassword} onClick={submit} className="w-full">{t.security.changePassword}</LoadingButton>
         </div>
       </Card>
+      {stepUp.dialog}
     </AuthBackground>
   );
 }

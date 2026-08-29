@@ -13,6 +13,7 @@ import { Server, Socket } from 'socket.io';
 import { AuthService, RequestUser } from '../auth/auth.service';
 import { attachRealtimeTransportDiagnostics, realtimeDiagnostic } from '../realtime-diagnostics';
 import { ChatService } from './chat.service';
+import { realtimeSessionRegistry } from '../auth/realtime-session-registry';
 
 type AuthenticatedSocket = Socket & {
   data: {
@@ -88,6 +89,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const user = await authentication;
       client.data.user = user;
+      realtimeSessionRegistry.register(`chat:${client.id}`, {
+        userId: user.id,
+        sessionId: user.sessionId,
+        disconnect: () => client.disconnect(true),
+      });
       client.data.joinedConversationIds = new Set<string>();
       const sockets = this.userSockets.get(user.id) ?? new Set<string>();
       sockets.add(client.id);
@@ -103,6 +109,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   async handleDisconnect(client: AuthenticatedSocket) {
+    realtimeSessionRegistry.unregister(`chat:${client.id}`);
     const user = client.data.user;
     if (!user) return;
     let lastSeenAt: Date | null = null;
@@ -398,7 +405,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async userOrDisconnect(client: AuthenticatedSocket) {
     const user = client.data.user;
-    if (user) return user;
+    if (user) {
+      try {
+        const refreshed = await this.auth.revalidateUserSession(user);
+        client.data.user = refreshed;
+        return refreshed;
+      } catch {
+        client.data.user = undefined;
+        client.data.authentication = undefined;
+      }
+    }
     try {
       const authenticatedUser = await client.data.authentication;
       if (authenticatedUser) {

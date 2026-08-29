@@ -32,6 +32,10 @@ export type AuditRequestContext = {
   correlationId?: string;
   sourceIp?: string;
   userAgent?: string;
+  countryCode?: string;
+  countryName?: string;
+  browser?: string;
+  operatingSystem?: string;
   route?: string;
   httpMethod?: string;
   httpStatus?: number;
@@ -63,7 +67,7 @@ const MAX_METADATA_BYTES = 16_384;
 const MAX_METADATA_KEYS = 64;
 const MAX_NESTING_DEPTH = 4;
 const MAX_STRING_LENGTH = 500;
-const sensitiveKey = /password|passwordhash|token|accesstoken|refreshtoken|secret|apikey|privatekey|authorization|cookie|smtp.?password|turnstile.?secret|encryption.?key/i;
+const sensitiveKey = /password|passwordhash|token|accesstoken|refreshtoken|secret|apikey|privatekey|authorization|cookie|smtp.?password|turnstile.?secret|encryption.?key|clientdatajson|authenticatordata|attestationobject|webauthn.*response|publickey/i;
 const approvedMetadataKeys = new Set([
   'actionUrl', 'added', 'alreadyRevoked', 'announcementId', 'applyMode', 'archiveReason', 'archivedAt',
   'automationRunId', 'boardId', 'boardName', 'campaignId', 'changed', 'changedById', 'channel',

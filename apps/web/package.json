@@ -19,6 +19,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@pe/shared": "workspace:*",
+    "@simplewebauthn/browser": "13.3.0",
     "clsx": "^2.1.1",
     "emoji-picker-react": "^4.19.1",
     "hls.js": "^1.5.18",

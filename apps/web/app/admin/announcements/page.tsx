@@ -2,9 +2,12 @@
 
 import { ArrowUpDown, Edit3, Eye, Heart, Megaphone, MessageCircle, Search, Send } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { AppSelect } from '../../../components/app-select';
+import { CommunityFeedView } from '../../../components/community-feed-view';
+import { PublicationCoverField, initialPublicationCoverSelection, publicationCoverValidation, publicationRequestBody, type PublicationCoverSelection } from '../../../components/publication-cover-field';
 import { AppShell } from '../../../components/shell';
 import { Card, DataTablePagination, LoadingButton, StatusBadge, TableEmptyState, TableErrorState, TableSkeleton } from '../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../lib/api';
@@ -19,6 +22,8 @@ type Announcement = {
   body: string;
   status: AnnouncementStatus;
   authorMode: AnnouncementAuthorMode;
+  coverUrl?: string | null;
+  coverSource?: 'UPLOAD' | 'EXTERNAL' | null;
   publishedAt?: string | null;
   updatedAt: string;
   createdAt: string;
@@ -31,12 +36,27 @@ type SortKey = 'title' | 'status' | 'updatedAt';
 type FormState = { id?: string; title: string; body: string; authorMode: AnnouncementAuthorMode };
 type EmailSettings = { available: boolean };
 type CurrentUser = { role: string };
+type AdminAnnouncementsMode = 'create' | 'view';
 
 const emptyForm: FormState = { title: '', body: '', authorMode: 'USER' };
 const pageSizes = [5, 10, 20, 50];
 
 export default function AdminAnnouncementsPage() {
+  return (
+    <Suspense fallback={<AdminAnnouncementsPageFallback />}>
+      <AdminAnnouncementsPageContent />
+    </Suspense>
+  );
+}
+
+function adminAnnouncementsMode(value: string | null): AdminAnnouncementsMode {
+  return value === 'view' ? 'view' : 'create';
+}
+
+function AdminAnnouncementsPageContent() {
   const { lang, t } = useI18n();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [data, setData] = useState<Announcement[] | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -46,6 +66,8 @@ export default function AdminAnnouncementsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [cover, setCover] = useState<PublicationCoverSelection>(() => initialPublicationCoverSelection());
+  const [coverError, setCoverError] = useState('');
   const [validation, setValidation] = useState('');
   const [saving, setSaving] = useState(false);
   const [publishingId, setPublishingId] = useState('');
@@ -54,6 +76,13 @@ export default function AdminAnnouncementsPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const locale = lang === 'fr' ? 'fr-FR' : 'en-US';
   const canPublishAsCommunityTeam = ['owner', 'admin'].includes(currentUser?.role.toLowerCase() ?? '');
+  const selectedMode = adminAnnouncementsMode(searchParams.get('mode'));
+
+  function selectMode(mode: AdminAnnouncementsMode) {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set('mode', mode);
+    router.replace(`/admin/announcements?${nextSearchParams.toString()}`, { scroll: false });
+  }
 
   async function load() {
     setError('');
@@ -107,6 +136,8 @@ export default function AdminAnnouncementsPage() {
 
   function editAnnouncement(item: Announcement) {
     setForm({ id: item.id, title: item.title, body: item.body, authorMode: item.authorMode });
+    setCover(initialPublicationCoverSelection(item.coverUrl, item.coverSource));
+    setCoverError('');
     setValidation('');
   }
 
@@ -117,20 +148,30 @@ export default function AdminAnnouncementsPage() {
       setValidation(t.admin.announcementValidationFailed);
       return;
     }
+    const nextCoverError = publicationCoverValidation(cover, {
+      fileRequired: t.admin.publicationCoverRequired,
+      invalidUrl: t.admin.publicationCoverInvalidUrl,
+    });
+    if (nextCoverError) {
+      setCoverError(nextCoverError);
+      return;
+    }
+    setCoverError('');
     setSaving(true);
     try {
       const path = form.id ? `/admin/${COMMUNITY_ID}/announcements/${form.id}` : `/admin/${COMMUNITY_ID}/announcements`;
       const method = form.id ? 'PATCH' : 'POST';
-      const saved = await apiFetch<Announcement>(path, { method, body: JSON.stringify({
+      const saved = await apiFetch<Announcement>(path, { method, body: publicationRequestBody({
         title: form.title,
         body: form.body,
         ...(canPublishAsCommunityTeam ? { authorMode: form.authorMode } : {}),
-      }) });
+      }, cover) });
       setData((current) => {
         if (!current) return [saved];
         return form.id ? current.map((item) => item.id === saved.id ? saved : item) : [saved, ...current];
       });
       setForm(emptyForm);
+      setCover(initialPublicationCoverSelection());
       toast.success(t.admin.announcementSaved);
     } catch {
       toast.error(t.admin.announcementSaveFailed);
@@ -156,13 +197,17 @@ export default function AdminAnnouncementsPage() {
   return (
     <AppShell admin>
       <div className="space-y-6">
-        <header>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent/90">{t.admin.operations}</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">{t.admin.announcementsTitle}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-white/55">{t.admin.announcementsSubtitle}</p>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent/90">{t.admin.operations}</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">{t.admin.announcementsTitle}</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/55">{t.admin.announcementsSubtitle}</p>
+          </div>
+          <AdminAnnouncementsModeTabs selectedMode={selectedMode} onSelect={selectMode} />
         </header>
 
-        <section className="overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.14),transparent_36%),linear-gradient(135deg,rgba(15,23,42,0.92),rgba(6,78,59,0.24))] shadow-2xl shadow-black/20">
+        <div id="admin-announcements-create-panel" role="tabpanel" aria-labelledby="admin-announcements-create-tab" hidden={selectedMode !== 'create'} className="space-y-6">
+          <section className="overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.14),transparent_36%),linear-gradient(135deg,rgba(15,23,42,0.92),rgba(6,78,59,0.24))] shadow-2xl shadow-black/20">
           <div className="border-b border-white/10 px-5 py-5 sm:px-6">
             <div className="flex items-start gap-4">
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
@@ -205,20 +250,51 @@ export default function AdminAnnouncementsPage() {
               <span className="text-sm font-medium text-white/72">{t.admin.announcementBodyLabel}</span>
               <textarea value={form.body} onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))} rows={8} className="mt-2 min-h-52 w-full resize-y rounded-xl border border-white/10 bg-black/20 px-3.5 py-3 text-sm leading-6 text-white outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/10" />
             </label>
+
+            <PublicationCoverField
+              value={cover}
+              onChange={(value) => { setCover(value); setCoverError(''); }}
+              disabled={saving}
+              loading={saving && cover.mode === 'UPLOAD'}
+              errorMessage={coverError}
+              className="xl:col-span-2"
+              labels={{
+                title: t.admin.publicationCoverLabel,
+                optional: t.admin.publicationCoverOptional,
+                description: t.admin.publicationCoverDescription,
+                noImage: t.admin.publicationCoverNone,
+                emptyDescription: t.admin.publicationCoverEmptyDescription,
+                upload: t.admin.publicationCoverUpload,
+                useUrl: t.admin.publicationCoverUseUrl,
+                url: t.admin.publicationCoverUrl,
+                chooseFile: t.admin.publicationCoverChooseFile,
+                replace: t.admin.publicationCoverReplace,
+                remove: t.admin.publicationCoverRemove,
+                preview: t.admin.publicationCoverPreview,
+                apply: t.admin.publicationCoverApply,
+                cancel: t.common.cancel,
+                supportedFiles: t.admin.publicationCoverSupportedFiles,
+                loadFailed: t.admin.publicationCoverLoadFailed,
+                saving: t.admin.publicationCoverSaving,
+                invalidType: t.admin.publicationCoverInvalidType,
+                tooLarge: t.admin.publicationCoverTooLarge,
+                invalidUrl: t.admin.publicationCoverInvalidUrl,
+              }}
+            />
           </div>
 
           {validation && <p className="mx-5 mb-5 rounded-xl border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-sm text-rose-100 sm:mx-6">{validation}</p>}
 
           <div className="flex flex-col-reverse gap-3 border-t border-white/10 bg-black/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
-            {form.id && <button onClick={() => { setForm(emptyForm); setValidation(''); }} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white/72 transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-accent/20">{t.common.cancel}</button>}
+            {form.id && <button onClick={() => { setForm(emptyForm); setCover(initialPublicationCoverSelection()); setCoverError(''); setValidation(''); }} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white/72 transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-accent/20">{t.common.cancel}</button>}
             <LoadingButton loading={saving} loadingLabel={t.admin.savingDraft} onClick={saveDraft}>
               {t.admin.saveDraft}
             </LoadingButton>
           </div>
-        </section>
+          </section>
 
-        <div>
-          <Card className="flex min-h-[34rem] flex-col overflow-hidden rounded-2xl border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-0 shadow-2xl shadow-black/25">
+          <div>
+            <Card className="flex min-h-[34rem] flex-col overflow-hidden rounded-2xl border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-0 shadow-2xl shadow-black/25">
             <div className="shrink-0 flex flex-col gap-3 border-b border-white/10 p-4 lg:flex-row lg:items-center lg:justify-between">
               <label className="relative block max-w-md flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/35" size={16} />
@@ -297,8 +373,68 @@ export default function AdminAnnouncementsPage() {
                 </div>
               </>
             )}
-          </Card>
+            </Card>
+          </div>
         </div>
+
+        <div id="admin-announcements-view-panel" role="tabpanel" aria-labelledby="admin-announcements-view-tab" hidden={selectedMode !== 'view'}>
+          <CommunityFeedView active={selectedMode === 'view'} showHeader={false} />
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+
+function AdminAnnouncementsModeTabs({ selectedMode, onSelect }: { selectedMode: AdminAnnouncementsMode; onSelect: (mode: AdminAnnouncementsMode) => void }) {
+  const { t } = useI18n();
+  const modes: Array<{ key: AdminAnnouncementsMode; label: string }> = [
+    { key: 'create', label: t.admin.eventsCreateMode },
+    { key: 'view', label: t.admin.eventsViewMode },
+  ];
+
+  function selectFromKeyboard(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex = index;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % modes.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + modes.length) % modes.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = modes.length - 1;
+    else return;
+    event.preventDefault();
+    const nextMode = modes[nextIndex].key;
+    onSelect(nextMode);
+    document.getElementById(`admin-announcements-${nextMode}-tab`)?.focus();
+  }
+
+  return (
+    <nav role="tablist" aria-label={t.admin.announcementsTitle} className="inline-flex w-fit max-w-full shrink-0 items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.035] p-1">
+      {modes.map((mode, index) => {
+        const active = selectedMode === mode.key;
+        return (
+          <button
+            key={mode.key}
+            id={`admin-announcements-${mode.key}-tab`}
+            type="button"
+            role="tab"
+            onClick={() => onSelect(mode.key)}
+            onKeyDown={(event) => selectFromKeyboard(event, index)}
+            aria-selected={active}
+            aria-controls={`admin-announcements-${mode.key}-panel`}
+            tabIndex={active ? 0 : -1}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-accent/30 ${active ? 'bg-accent text-black shadow-sm' : 'text-white/60 hover:bg-white/[0.06] hover:text-white'}`}
+          >
+            {mode.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function AdminAnnouncementsPageFallback() {
+  return (
+    <AppShell admin>
+      <div className="space-y-6">
+        <TableSkeleton rows={5} columns={5} />
       </div>
     </AppShell>
   );

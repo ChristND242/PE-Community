@@ -1,18 +1,19 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 
-function encryptionKey() {
-  const secret = encryptionSecret();
-  return createHash('sha256').update(secret).digest();
+const encryptionKeyPlaceholder = '<generate-a-strong-random-secret>';
+
+export function validateProductionSecretEncryption(environment: NodeJS.ProcessEnv = process.env) {
+  if (environment.NODE_ENV !== 'production') return;
+  const secret = environment.EMAIL_ENCRYPTION_KEY;
+  if (!secret || secret === encryptionKeyPlaceholder || Buffer.byteLength(secret, 'utf8') < 32) {
+    throw new Error('EMAIL_ENCRYPTION_KEY is required in production and must contain at least 32 bytes.');
+  }
 }
 
-function encryptionSecret() {
-  const configured = [process.env.EMAIL_ENCRYPTION_KEY, process.env.JWT_SECRET]
-    .find((value) => value?.trim() && value !== '<generate-a-strong-independent-secret>');
-  if (configured) return configured;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('EMAIL_ENCRYPTION_KEY or JWT_SECRET is required in production.');
-  }
-  return 'local-development-secret-change-before-production';
+function encryptionKey() {
+  validateProductionSecretEncryption();
+  const secret = process.env.EMAIL_ENCRYPTION_KEY ?? process.env.JWT_SECRET ?? 'local-development-secret-change-before-production';
+  return createHash('sha256').update(secret).digest();
 }
 
 export function encryptSecret(value: string) {
