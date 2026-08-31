@@ -4,13 +4,24 @@ import test from 'node:test';
 import { validateManifest } from './domain.js';
 
 test('release workflow is SHA-pinned, least-privilege, draft-first, and inventory-gated', async () => {
-  const workflow = await readFile(new URL('../../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
+  const [workflow, validator] = await Promise.all([
+    readFile(new URL('../../../.github/workflows/publish-images.yml', import.meta.url), 'utf8'),
+    readFile(new URL('../../../.github/scripts/validate-release-ref.sh', import.meta.url), 'utf8'),
+  ]);
   assert.match(workflow, /push:\s*\n\s*tags:/);
   assert.match(workflow, /gh release create[^\n]+--draft/);
-  assert.match(workflow, /git cat-file -t/);
-  assert.match(workflow, /git merge-base --is-ancestor/);
-  assert.match(workflow, /git fetch --no-tags origin main/);
-  assert.match(workflow, /refs\/remotes\/origin\/main/);
+  assert.match(workflow, /RELEASE_REF_TYPE: \$\{\{ github\.ref_type \}\}/);
+  assert.match(workflow, /CHECKOUT_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /bash \.github\/scripts\/validate-release-ref\.sh/);
+  assert.match(workflow, /fetch-tags: false/);
+  assert.match(validator, /RELEASE_REF_TYPE.*== "tag"/);
+  assert.match(validator, /RELEASE_REF.*== "refs\/tags\/\$RELEASE_TAG"/);
+  assert.match(validator, /git fetch --force --no-tags origin "\$tag_ref:\$tag_ref"/);
+  assert.match(validator, /git cat-file -t "\$tag_ref"/);
+  assert.match(validator, /git rev-parse "\$tag_ref\^\{commit\}"/);
+  assert.match(validator, /git rev-parse "\$CHECKOUT_SHA\^\{commit\}"/);
+  assert.match(validator, /git merge-base --is-ancestor "\$source_commit" "\$main_ref"/);
+  assert.match(validator, /\+refs\/heads\/main:\$main_ref/);
   assert.equal((workflow.match(/actions\/attest-build-provenance@[a-f0-9]{40}/g) ?? []).length, 4);
   const actionUses = [...workflow.matchAll(/uses:\s*[^\s@]+@([^\s#]+)/g)].map((match) => match[1]);
   assert.ok(actionUses.length > 0);
@@ -32,6 +43,8 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   assert.equal((workflow.match(/APP_VERSION=\$\{\{ needs\.validate\.outputs\.version \}\}/g) ?? []).length, 3);
   assert.equal((workflow.match(/SOURCE_COMMIT=\$\{\{ needs\.validate\.outputs\.source_commit \}\}/g) ?? []).length, 3);
   assert.equal((workflow.match(/BUILD_DATE=\$\{\{ needs\.validate\.outputs\.build_date \}\}/g) ?? []).length, 3);
+  assert.equal((workflow.match(/ref: \$\{\{ needs\.validate\.outputs\.source_commit \}\}/g) ?? []).length, 2);
+  assert.match(workflow, /gh release create[^\n]+--target "\$SOURCE_COMMIT"/);
   for (const dockerfilePath of ['../../api/Dockerfile', '../../web/Dockerfile', '../../worker/Dockerfile']) {
     const dockerfile = await readFile(new URL(dockerfilePath, import.meta.url), 'utf8');
     assert.match(dockerfile, /org\.opencontainers\.image\.version=\$\{APP_VERSION\}/);

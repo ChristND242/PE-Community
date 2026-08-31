@@ -20,33 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
       - id: release
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          CHECKOUT_SHA: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Release tag must be strict stable semver (vMAJOR.MINOR.PATCH)." >&2
-            exit 1
-          fi
-          if [[ "$(git cat-file -t "$RELEASE_TAG")" != "tag" ]]; then
-            echo "Automatic releases require an annotated tag." >&2
-            exit 1
-          fi
-          source_commit="$(git rev-parse "$RELEASE_TAG^{commit}")"
-          if [[ ! "$source_commit" =~ ^[a-f0-9]{40}$ ]]; then
-            echo "Release tag did not resolve to a commit." >&2
-            exit 1
-          fi
-          git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$source_commit" refs/remotes/origin/main; then
-            echo "Release commit must belong to the protected main history." >&2
-            exit 1
-          fi
-          echo "version=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
-          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          bash .github/scripts/validate-release-ref.sh
 
   image:
     needs: validate
@@ -62,6 +45,8 @@ jobs:
       worker_digest: ${{ steps.worker.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate.outputs.source_commit }}
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -126,6 +111,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate.outputs.source_commit }}
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -179,6 +166,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.validate.outputs.version }}
           VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
         run: |
           set -euo pipefail
           manifest="pe-community-update-manifest.json"
@@ -195,7 +183,7 @@ jobs:
               exit 1
             fi
           else
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$RELEASE_TAG" --notes "PE Community $RELEASE_TAG"
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --target "$SOURCE_COMMIT" --draft --title "$RELEASE_TAG" --notes "PE Community $RELEASE_TAG"
           fi
 
           gh release upload "$RELEASE_TAG" "$manifest" "$bundle" "$updater" --repo "$GITHUB_REPOSITORY"
