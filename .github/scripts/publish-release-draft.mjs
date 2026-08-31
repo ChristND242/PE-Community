@@ -6,6 +6,10 @@ const API_VERSION = '2022-11-28';
 const EXPECTED_REPOSITORY = 'Pona-Ekolo/PE-Community';
 const SEMVER_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
+const PRODUCTION_RELEASE_POLICY = Object.freeze({
+  repository: EXPECTED_REPOSITORY,
+  tagPattern: SEMVER_TAG,
+});
 export const READ_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
 export const RELEASE_STATES = Object.freeze({
   NO_RELEASE: 'NO_RELEASE',
@@ -147,10 +151,14 @@ export function classifyReleaseState(release, artifacts) {
   }
 }
 
-export async function publishReleaseDraft(api, input) {
-  if (input.repository !== EXPECTED_REPOSITORY)
+export async function publishReleaseDraftWithPolicy(api, input, policy) {
+  if (!policy || input.repository !== policy.repository)
     fail('RELEASE_REPOSITORY_MISMATCH');
-  if (!SEMVER_TAG.test(input.tag)) fail('RELEASE_TAG_INVALID');
+  if (
+    !(policy.tagPattern instanceof RegExp) ||
+    !policy.tagPattern.test(input.tag)
+  )
+    fail('RELEASE_TAG_INVALID');
   if (!COMMIT_SHA.test(input.sourceCommit))
     fail('RELEASE_SOURCE_COMMIT_INVALID');
   if (
@@ -252,6 +260,10 @@ export async function publishReleaseDraft(api, input) {
     fail('RELEASE_URL_MISMATCH');
   }
   return verified;
+}
+
+export async function publishReleaseDraft(api, input) {
+  return publishReleaseDraftWithPolicy(api, input, PRODUCTION_RELEASE_POLICY);
 }
 
 export class GitHubReleaseApi {

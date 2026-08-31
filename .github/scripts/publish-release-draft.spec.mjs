@@ -250,6 +250,21 @@ test('aborts without mutation when a published release already exists', async ()
   assert.deepEqual(api.calls, ['list']);
 });
 
+test('production publisher remains bound to its repository and stable semver tags', async () => {
+  const testRepositoryApi = new FakeApi();
+  await expectFailure(testRepositoryApi, 'RELEASE_REPOSITORY_MISMATCH', {
+    ...input,
+    repository: 'Pona-Ekolo/PE-Community-Release-Test',
+  });
+  assert.deepEqual(testRepositoryApi.calls, []);
+  const testTagApi = new FakeApi();
+  await expectFailure(testTagApi, 'RELEASE_TAG_INVALID', {
+    ...input,
+    tag: 'release-test-audit-run-clean',
+  });
+  assert.deepEqual(testTagApi.calls, []);
+});
+
 test('fails closed when multiple matching drafts are present', async () => {
   const api = new FakeApi([draft(), draft({ id: 42 })]);
   await expectFailure(api, 'RELEASE_DRAFT_AMBIGUOUS');
