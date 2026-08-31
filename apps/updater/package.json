@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "test": "tsx --test src/*.spec.ts"
+    "test": "tsx --test src/*.spec.ts && node ../../.github/scripts/publish-release-draft.spec.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
