@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { publishReleaseDraft } from './publish-release-draft.mjs';
+import {
+  classifyReleaseState,
+  GitHubReleaseApi,
+  publishReleaseDraft,
+  READ_RETRY_DELAYS_MS,
+  RELEASE_STATES,
+} from './publish-release-draft.mjs';
 
 const repository = 'Pona-Ekolo/PE-Community';
 const tag = 'v1.2.1';
@@ -42,6 +48,8 @@ function draft(overrides = {}) {
     draft: true,
     prerelease: false,
     target_commitish: sourceCommit,
+    upload_url:
+      'https://uploads.github.com/repos/Pona-Ekolo/PE-Community/releases/41/assets{?name,label}',
     html_url:
       'https://github.com/Pona-Ekolo/PE-Community/releases/tag/untagged-test',
     assets: [],
@@ -75,7 +83,9 @@ class FakeApi {
 
   async uploadAsset(id, artifact) {
     this.calls.push(`upload:${artifact.name}`);
-    const release = this.releases.find((candidate) => candidate.id === id);
+    const release = this.releases.find(
+      (candidate) => candidate.id === (typeof id === 'object' ? id.id : id),
+    );
     const uploaded = asset(artifact, this.nextId++);
     release.assets.push(uploaded);
     return structuredClone(uploaded);
@@ -94,6 +104,64 @@ class FakeApi {
     release.draft = false;
     release.html_url = `https://github.com/Pona-Ekolo/PE-Community/releases/tag/${tag}`;
     return structuredClone(release);
+  }
+}
+
+class ConfigurableApi extends FakeApi {
+  constructor(releases = [], options = {}) {
+    super(releases);
+    this.options = { ...options };
+    this.getCount = 0;
+  }
+
+  async createDraft(createInput) {
+    if (this.options.createFailureWithoutResource) {
+      this.calls.push('create');
+      throw new Error('NETWORK_FAILURE');
+    }
+    const created = await super.createDraft(createInput);
+    if (this.options.createFailure) throw new Error('NETWORK_FAILURE');
+    return created;
+  }
+
+  async getRelease(id) {
+    this.getCount += 1;
+    if (this.options.get404Remaining > 0) {
+      this.options.get404Remaining -= 1;
+      throw new Error('GITHUB_API_HTTP_404');
+    }
+    const release = await super.getRelease(id);
+    if (this.options.incompleteRemaining > 0) {
+      this.options.incompleteRemaining -= 1;
+      return { ...release, assets: [] };
+    }
+    if (this.options.digestMissingRemaining > 0) {
+      this.options.digestMissingRemaining -= 1;
+      return {
+        ...release,
+        assets: release.assets.map((candidate) => ({
+          ...candidate,
+          digest: null,
+        })),
+      };
+    }
+    if (this.options.publishStaleRemaining > 0 && release.draft === false) {
+      this.options.publishStaleRemaining -= 1;
+      return { ...release, draft: true };
+    }
+    return release;
+  }
+
+  async uploadAsset(release, artifact) {
+    const uploaded = await super.uploadAsset(release, artifact);
+    if (this.options.uploadFailure) throw new Error('NETWORK_FAILURE');
+    return uploaded;
+  }
+
+  async publishRelease(id, input) {
+    const published = await super.publishRelease(id, input);
+    if (this.options.publishFailure) throw new Error('NETWORK_FAILURE');
+    return published;
   }
 }
 
@@ -209,4 +277,150 @@ test('rerun after partial upload does not duplicate the release or exact assets'
     [`upload:${artifacts[2].name}`],
   );
   assert.equal(new Set(api.releases[0].assets.map(({ name }) => name)).size, 3);
+});
+
+test('does not require a just-created release to appear in the collection listing', async () => {
+  const api = new ConfigurableApi();
+  await publishReleaseDraft(api, input);
+  assert.equal(api.calls.filter((call) => call === 'list').length, 1);
+});
+
+test('retries a transient ID read without creating a second release', async () => {
+  const api = new ConfigurableApi([], { get404Remaining: 1 });
+  await publishReleaseDraft(api, input);
+  assert.equal(api.calls.filter((call) => call === 'create').length, 1);
+  assert.equal(api.calls.filter((call) => call === 'publish:100').length, 1);
+});
+
+test('fails closed when the created release never becomes readable by ID', async () => {
+  const api = new ConfigurableApi([], { get404Remaining: 10 });
+  await assert.rejects(
+    () => publishReleaseDraft(api, input),
+    /RELEASE_CREATE_READ_TIMEOUT/,
+  );
+  assert.equal(api.calls.filter((call) => call === 'create').length, 1);
+  assert.equal(api.getCount, READ_RETRY_DELAYS_MS.length + 1);
+});
+
+test('retries incomplete asset visibility and a temporarily missing digest', async () => {
+  const api = new ConfigurableApi([], {
+    incompleteRemaining: 1,
+    digestMissingRemaining: 1,
+  });
+  await publishReleaseDraft(api, input);
+  assert.ok(api.calls.includes('publish:100'));
+});
+
+test('reconciles an unknown create outcome through listing without a second POST', async () => {
+  const api = new ConfigurableApi([], { createFailure: true });
+  await publishReleaseDraft(api, input);
+  assert.equal(api.calls.filter((call) => call === 'create').length, 1);
+  assert.equal(
+    api.calls.filter((call) => call.startsWith('upload:')).length,
+    3,
+  );
+});
+
+test('does not retry a create POST when the outcome is unknown and no draft is listed', async () => {
+  const api = new ConfigurableApi([], { createFailureWithoutResource: true });
+  await assert.rejects(
+    () => publishReleaseDraft(api, input),
+    /RELEASE_CREATE_UNKNOWN/,
+  );
+  assert.equal(api.calls.filter((call) => call === 'create').length, 1);
+});
+
+test('reconciles an unknown publication outcome by reading the same ID', async () => {
+  const api = new ConfigurableApi([], { publishFailure: true });
+  const result = await publishReleaseDraft(api, input);
+  assert.equal(result.draft, false);
+  assert.equal(api.calls.filter((call) => call === 'publish:100').length, 1);
+});
+
+test('retries publication verification when the first read still reports a draft', async () => {
+  const api = new ConfigurableApi([], { publishStaleRemaining: 1 });
+  const result = await publishReleaseDraft(api, input);
+  assert.equal(result.draft, false);
+});
+
+test('fails closed when publication state never converges', async () => {
+  const api = new ConfigurableApi([], { publishStaleRemaining: 10 });
+  await assert.rejects(
+    () => publishReleaseDraft(api, input),
+    /RELEASE_PUBLISH_UNKNOWN/,
+  );
+  assert.equal(api.calls.filter((call) => call === 'publish:100').length, 1);
+});
+
+test('classifies the explicit release states from safe release metadata', () => {
+  assert.equal(
+    classifyReleaseState(null, artifacts),
+    RELEASE_STATES.NO_RELEASE,
+  );
+  assert.equal(
+    classifyReleaseState(draft(), artifacts),
+    RELEASE_STATES.DRAFT_CREATED,
+  );
+  assert.equal(
+    classifyReleaseState(
+      draft({ assets: [asset(artifacts[0], 50)] }),
+      artifacts,
+    ),
+    RELEASE_STATES.DRAFT_PARTIAL,
+  );
+  assert.equal(
+    classifyReleaseState(
+      draft({
+        assets: artifacts.map((candidate, index) => asset(candidate, index)),
+      }),
+      artifacts,
+    ),
+    RELEASE_STATES.DRAFT_COMPLETE,
+  );
+  assert.equal(
+    classifyReleaseState(draft({ draft: false }), artifacts),
+    RELEASE_STATES.PUBLISHED,
+  );
+  assert.equal(
+    classifyReleaseState(draft({ prerelease: true }), artifacts),
+    RELEASE_STATES.INVALID,
+  );
+});
+
+test('reconciles an unknown asset upload outcome without uploading it twice', async () => {
+  const api = new ConfigurableApi([], { uploadFailure: true });
+  await publishReleaseDraft(api, input);
+  assert.equal(
+    api.calls.filter((call) => call.startsWith('upload:')).length,
+    3,
+  );
+});
+
+test('uploads through the validated release-specific upload URL', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response('{}', { status: 200 });
+  };
+  const api = new GitHubReleaseApi(repository, 'test-token', fetchImpl);
+  await api.uploadAsset(draft(), artifacts[0]);
+  assert.match(
+    calls[0].url,
+    /^https:\/\/uploads\.github\.com\/repos\/Pona-Ekolo\/PE-Community\/releases\/41\/assets\?name=/,
+  );
+  assert.equal(calls[0].init.method, 'POST');
+  for (const uploadUrl of [
+    'https://uploads.github.com/repos/Other/PE-Community/releases/41/assets{?name,label}',
+    'https://uploads.github.com/repos/Pona-Ekolo/PE-Community/releases/42/assets{?name,label}',
+    'https://uploads.github.com/repos/Pona-Ekolo/PE-Community/releases/41/assets?unexpected=1{?name,label}',
+    'http://uploads.github.com/repos/Pona-Ekolo/PE-Community/releases/41/assets{?name,label}',
+    'https://example.test/repos/Pona-Ekolo/PE-Community/releases/41/assets{?name,label}',
+    'https://uploads.github.com:443/repos/Pona-Ekolo/PE-Community/releases/41/assets{?name,label}',
+  ]) {
+    await assert.rejects(
+      () =>
+        api.uploadAsset({ ...draft(), upload_url: uploadUrl }, artifacts[0]),
+      /RELEASE_UPLOAD_URL_INVALID/,
+    );
+  }
 });

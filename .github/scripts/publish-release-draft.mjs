@@ -6,6 +6,16 @@ const API_VERSION = '2022-11-28';
 const EXPECTED_REPOSITORY = 'Pona-Ekolo/PE-Community';
 const SEMVER_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
+export const READ_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
+export const RELEASE_STATES = Object.freeze({
+  NO_RELEASE: 'NO_RELEASE',
+  DRAFT_CREATED: 'DRAFT_CREATED',
+  DRAFT_PARTIAL: 'DRAFT_PARTIAL',
+  DRAFT_COMPLETE: 'DRAFT_COMPLETE',
+  PUBLISHED: 'PUBLISHED',
+  AMBIGUOUS: 'AMBIGUOUS',
+  INVALID: 'INVALID',
+});
 
 function fail(code) {
   throw new Error(code);
@@ -23,7 +33,12 @@ function assertReleaseIdentity(release, input, expectedDraft) {
     fail(expectedDraft ? 'RELEASE_NOT_DRAFT' : 'RELEASE_NOT_PUBLISHED');
 }
 
-function validateAssetInventory(release, artifacts, requireComplete) {
+function validateAssetInventory(
+  release,
+  artifacts,
+  requireComplete,
+  allowMissingDigest = false,
+) {
   const expected = new Map(
     artifacts.map((artifact) => [artifact.name, artifact]),
   );
@@ -35,12 +50,72 @@ function validateAssetInventory(release, artifacts, requireComplete) {
     const artifact = expected.get(asset.name);
     if (!artifact) fail('RELEASE_ASSET_UNEXPECTED');
     if (asset.size !== artifact.size) fail('RELEASE_ASSET_SIZE_MISMATCH');
+    if (!asset.digest && allowMissingDigest) continue;
+    if (!asset.digest) fail('RELEASE_ASSET_DIGEST_MISSING');
     if (asset.digest !== artifact.digest) fail('RELEASE_ASSET_DIGEST_MISMATCH');
   }
 
   if (requireComplete && seen.size !== expected.size)
     fail('RELEASE_ASSET_INVENTORY_INCOMPLETE');
   return seen;
+}
+
+function isRetryableReadError(error) {
+  return error instanceof Error && error.message === 'GITHUB_API_HTTP_404';
+}
+
+async function readReleaseWithRetry(
+  api,
+  releaseId,
+  input,
+  expectedDraft,
+  completeInventory = false,
+  requiredAssetName = null,
+) {
+  let lastError;
+  for (let attempt = 0; attempt <= READ_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const release = await api.getRelease(releaseId);
+      assertReleaseIdentity(release, input, expectedDraft);
+      if (completeInventory || requiredAssetName) {
+        validateAssetInventory(release, input.artifacts, false, true);
+        const names = new Set((release.assets ?? []).map(({ name }) => name));
+        if (requiredAssetName && !names.has(requiredAssetName))
+          fail('RELEASE_ASSET_INVENTORY_INCOMPLETE');
+        if (completeInventory && names.size !== input.artifacts.length)
+          fail('RELEASE_ASSET_INVENTORY_INCOMPLETE');
+        if (completeInventory)
+          validateAssetInventory(release, input.artifacts, true);
+        else validateAssetInventory(release, input.artifacts, false);
+      }
+      return release;
+    } catch (error) {
+      const retryable =
+        isRetryableReadError(error) ||
+        ((completeInventory || requiredAssetName) &&
+          error instanceof Error &&
+          [
+            'RELEASE_ASSET_INVENTORY_INCOMPLETE',
+            'RELEASE_ASSET_DIGEST_MISSING',
+          ].includes(error.message)) ||
+        (!expectedDraft &&
+          error instanceof Error &&
+          error.message === 'RELEASE_NOT_PUBLISHED');
+      if (!retryable) throw error;
+      lastError = error;
+      if (attempt < READ_RETRY_DELAYS_MS.length) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, READ_RETRY_DELAYS_MS[attempt]),
+        );
+      }
+    }
+  }
+  throw new Error(
+    completeInventory
+      ? 'RELEASE_ASSET_VERIFICATION_TIMEOUT'
+      : 'RELEASE_CREATE_READ_TIMEOUT',
+    { cause: lastError },
+  );
 }
 
 function selectRelease(releases, input) {
@@ -53,6 +128,23 @@ function selectRelease(releases, input) {
   if (candidates.length === 0) return null;
   assertReleaseIdentity(candidates[0], input, true);
   return candidates[0];
+}
+
+export function classifyReleaseState(release, artifacts) {
+  if (!release) return RELEASE_STATES.NO_RELEASE;
+  if (release.draft === false) return RELEASE_STATES.PUBLISHED;
+  if (release.draft !== true || release.prerelease !== false)
+    return RELEASE_STATES.INVALID;
+  try {
+    const names = validateAssetInventory(release, artifacts, false, true);
+    if (names.size === 0) return RELEASE_STATES.DRAFT_CREATED;
+    return names.size === artifacts.length &&
+      (release.assets ?? []).every(({ digest }) => Boolean(digest))
+      ? RELEASE_STATES.DRAFT_COMPLETE
+      : RELEASE_STATES.DRAFT_PARTIAL;
+  } catch {
+    return RELEASE_STATES.INVALID;
+  }
 }
 
 export async function publishReleaseDraft(api, input) {
@@ -70,40 +162,88 @@ export async function publishReleaseDraft(api, input) {
 
   let release = selectRelease(await api.listReleases(), input);
   if (!release) {
-    const created = await api.createDraft({
+    let created;
+    try {
+      created = await api.createDraft({
+        tag: input.tag,
+        sourceCommit: input.sourceCommit,
+        name: input.tag,
+        body: `PE Community ${input.tag}`,
+      });
+    } catch (error) {
+      try {
+        release = selectRelease(await api.listReleases(), input);
+      } catch {
+        fail('RELEASE_CREATE_UNKNOWN');
+      }
+      if (!release) throw new Error('RELEASE_CREATE_UNKNOWN', { cause: error });
+    }
+    if (!release) {
+      assertReleaseIdentity(created, input, true);
+      release = await readReleaseWithRetry(api, created.id, input, true);
+    }
+  }
+
+  assertReleaseIdentity(release, input, true);
+  const existingNames = validateAssetInventory(
+    release,
+    input.artifacts,
+    false,
+    true,
+  );
+  for (const artifact of input.artifacts) {
+    if (existingNames.has(artifact.name)) continue;
+    try {
+      await api.uploadAsset(release, artifact);
+    } catch (error) {
+      try {
+        release = await readReleaseWithRetry(
+          api,
+          release.id,
+          input,
+          true,
+          false,
+          artifact.name,
+        );
+      } catch (reconciliationError) {
+        if (
+          reconciliationError instanceof Error &&
+          [
+            'RELEASE_ASSET_DUPLICATE',
+            'RELEASE_ASSET_UNEXPECTED',
+            'RELEASE_ASSET_SIZE_MISMATCH',
+            'RELEASE_ASSET_DIGEST_MISMATCH',
+          ].includes(reconciliationError.message)
+        ) {
+          throw reconciliationError;
+        }
+        throw new Error('RELEASE_ASSET_UPLOAD_UNKNOWN', { cause: error });
+      }
+    }
+  }
+
+  release = await readReleaseWithRetry(api, release.id, input, true, true);
+
+  try {
+    await api.publishRelease(release.id, {
       tag: input.tag,
       sourceCommit: input.sourceCommit,
       name: input.tag,
-      body: `PE Community ${input.tag}`,
     });
-    assertReleaseIdentity(created, input, true);
-    const discovered = selectRelease(await api.listReleases(), input);
-    if (!discovered || discovered.id !== created.id)
-      fail('RELEASE_DRAFT_DISCOVERY_MISMATCH');
-    release = discovered;
+  } catch (error) {
+    try {
+      return await readReleaseWithRetry(api, release.id, input, false, true);
+    } catch {
+      throw new Error('RELEASE_PUBLISH_UNKNOWN', { cause: error });
+    }
   }
 
-  assertReleaseIdentity(release, input, true);
-  const existingNames = validateAssetInventory(release, input.artifacts, false);
-  for (const artifact of input.artifacts) {
-    if (!existingNames.has(artifact.name))
-      await api.uploadAsset(release.id, artifact);
+  let verified;
+  try {
+    verified = await readReleaseWithRetry(api, release.id, input, false, true);
+  } catch (error) {
+    throw new Error('RELEASE_PUBLISH_UNKNOWN', { cause: error });
   }
-
-  release = await api.getRelease(release.id);
-  assertReleaseIdentity(release, input, true);
-  validateAssetInventory(release, input.artifacts, true);
-
-  const published = await api.publishRelease(release.id, {
-    tag: input.tag,
-    sourceCommit: input.sourceCommit,
-    name: input.tag,
-  });
-  assertReleaseIdentity(published, input, false);
-
-  const verified = await api.getRelease(release.id);
-  assertReleaseIdentity(verified, input, false);
-  validateAssetInventory(verified, input.artifacts, true);
   if (
     !verified.html_url?.endsWith(
       `/releases/tag/${encodeURIComponent(input.tag)}`,
@@ -114,14 +254,15 @@ export async function publishReleaseDraft(api, input) {
   return verified;
 }
 
-class GitHubReleaseApi {
-  constructor(repository, token) {
+export class GitHubReleaseApi {
+  constructor(repository, token, fetchImpl = fetch) {
     this.repository = repository;
     this.token = token;
+    this.fetch = fetchImpl;
   }
 
   async request(url, init = {}) {
-    const response = await fetch(url, {
+    const response = await this.fetch(url, {
       ...init,
       headers: {
         Accept: 'application/vnd.github+json',
@@ -168,15 +309,38 @@ class GitHubReleaseApi {
     return response.json();
   }
 
-  async uploadAsset(releaseId, artifact) {
-    const response = await this.request(
-      `https://uploads.github.com/repos/${this.repository}/releases/${releaseId}/assets?name=${encodeURIComponent(artifact.name)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: artifact.content,
-      },
-    );
+  async uploadAsset(release, artifact) {
+    if (typeof release.upload_url !== 'string')
+      fail('RELEASE_UPLOAD_URL_MISSING');
+    if (!Number.isSafeInteger(release.id) || release.id <= 0)
+      fail('RELEASE_ID_INVALID');
+    const templateSuffix = '{?name,label}';
+    if (!release.upload_url.endsWith(templateSuffix))
+      fail('RELEASE_UPLOAD_URL_INVALID');
+    const uploadBase = release.upload_url.slice(0, -templateSuffix.length);
+    const rawAuthority = /^https:\/\/([^/?#]+)/.exec(uploadBase)?.[1];
+    if (rawAuthority !== 'uploads.github.com')
+      fail('RELEASE_UPLOAD_URL_INVALID');
+    const uploadUrl = new URL(uploadBase);
+    const expectedPath = `/repos/${this.repository}/releases/${release.id}/assets`;
+    if (
+      uploadUrl.protocol !== 'https:' ||
+      uploadUrl.hostname !== 'uploads.github.com' ||
+      uploadUrl.port !== '' ||
+      uploadUrl.username !== '' ||
+      uploadUrl.password !== '' ||
+      uploadUrl.pathname !== expectedPath ||
+      uploadUrl.search !== '' ||
+      uploadUrl.hash !== ''
+    ) {
+      fail('RELEASE_UPLOAD_URL_INVALID');
+    }
+    uploadUrl.searchParams.set('name', artifact.name);
+    const response = await this.request(uploadUrl.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: artifact.content,
+    });
     return response.json();
   }
 
