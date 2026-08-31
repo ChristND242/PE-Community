@@ -11,6 +11,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { SetupModule } from './setup/setup.module';
 import { SecurityModule } from './security/security.module';
 import { OwnerBreakGlassModule } from './owner-break-glass/owner-break-glass.module';
+import { SystemUpdatesModule } from './system-updates/system-updates.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { OwnerBreakGlassModule } from './owner-break-glass/owner-break-glass.mod
     ChatModule,
     AdminModule,
     CommunitiesModule,
+    SystemUpdatesModule,
   ],
   controllers: [HealthController],
 })

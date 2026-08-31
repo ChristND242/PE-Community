@@ -4,7 +4,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { mkdirSync } from 'fs';
 import { AppModule } from './app.module';
-import { avatarUploadDir, publicationCoverUploadDir } from './uploads';
+import { avatarUploadDir, eventImageUploadDir, publicationCoverUploadDir } from './uploads';
 import { trustedProxy } from './security/security-request-context';
 
 async function bootstrap() {
@@ -14,6 +14,13 @@ async function bootstrap() {
   mkdirSync(uploads, { recursive: true });
   app.useStaticAssets(uploads, {
     prefix: '/uploads/avatars',
+    fallthrough: false,
+    index: false,
+  });
+  const eventImages = eventImageUploadDir();
+  mkdirSync(eventImages, { recursive: true });
+  app.useStaticAssets(eventImages, {
+    prefix: '/uploads/event-images',
     fallthrough: false,
     index: false,
   });

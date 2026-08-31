@@ -11,7 +11,7 @@ import { AdminService } from './admin.service';
 import { ProfileLinksService } from '../profile-links/profile-links.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { randomUUID } from 'crypto';
-import { maxPublicationCoverUploadSize, type PublicationCoverUploadFile } from '../uploads';
+import { maxEventImageUploadSize, maxPublicationCoverUploadSize, type EventImageUploadFile, type PublicationCoverUploadFile } from '../uploads';
 import { StepUpService } from '../auth/step-up.service';
 import { auditRequestContext } from '../auth/auth-http';
 import { SecurityActivityService } from '../auth/security-activity.service';
@@ -674,9 +674,10 @@ export class AdminController {
   }
 
   @Post('events')
-  async createEvent(@Param('communityId') communityId: string, @Req() req: Request, @Body() body: Record<string, unknown>) {
+  @UseInterceptors(FileInterceptor('eventImage', { limits: { fileSize: maxEventImageUploadSize } }))
+  async createEvent(@Param('communityId') communityId: string, @Req() req: Request, @Body() body: Record<string, unknown>, @UploadedFile() eventImage?: EventImageUploadFile) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.eventsCreate);
-    return this.admin.createEvent(communityId, user.id, body);
+    return this.admin.createEvent(communityId, user.id, body, eventImage);
   }
 
   @Get('event-task-templates')
@@ -722,9 +723,10 @@ export class AdminController {
   }
 
   @Patch('events/:eventId')
-  async updateEvent(@Param('communityId') communityId: string, @Param('eventId') eventId: string, @Req() req: Request, @Body() body: Record<string, unknown>) {
+  @UseInterceptors(FileInterceptor('eventImage', { limits: { fileSize: maxEventImageUploadSize } }))
+  async updateEvent(@Param('communityId') communityId: string, @Param('eventId') eventId: string, @Req() req: Request, @Body() body: Record<string, unknown>, @UploadedFile() eventImage?: EventImageUploadFile) {
     const user = await this.requireAdminPermission(req, communityId, PERMISSIONS.eventsUpdate);
-    return this.admin.updateEvent(communityId, eventId, user.id, body);
+    return this.admin.updateEvent(communityId, eventId, user.id, body, eventImage);
   }
 
   @Delete('events/:eventId')

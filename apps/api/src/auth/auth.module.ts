@@ -49,6 +49,6 @@ import { loadJwtSecret } from './auth-security-config';
       }),
     },
   ],
-  exports: [AuthService, LoginStreakService, EmailChangeService, StepUpService, SecurityActivityService],
+  exports: [AuthService, LoginStreakService, EmailChangeService, PasskeyChallengeService, StepUpService, SecurityActivityService],
 })
 export class AuthModule {}

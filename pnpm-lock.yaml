@@ -219,6 +219,18 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  apps/updater:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.20
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   apps/web:
     dependencies:
       '@dicebear/core':

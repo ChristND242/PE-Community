@@ -206,7 +206,7 @@ export function ConfirmDialog({
 
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
-    <div data-confirm-dialog-root className="fixed inset-0 z-[80] grid h-dvh place-items-center p-4">
+    <div data-confirm-dialog-root className="fixed inset-0 z-[260] grid h-dvh place-items-center p-4">
       <div data-confirm-dialog-overlay aria-hidden="true" className={cn('fixed inset-0 z-0 bg-[var(--app-overlay)]', overlayClassName)} />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="relative z-10 w-full max-w-md rounded-2xl border border-[var(--app-border)] bg-[var(--app-dialog)] p-5 text-[var(--app-foreground)] shadow-2xl shadow-black/50">
         <h2 id={titleId} className="text-lg font-semibold text-[var(--app-foreground)]">{title}</h2>

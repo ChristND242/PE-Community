@@ -2,15 +2,21 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { generateChatKeyPair } from './chat-crypto';
-import { exportEncryptedChatKeyBackup, importEncryptedChatKeyBackup } from './chat-key-recovery';
+import { chatPublicKeysEqual, generateChatKeyPair } from './chat-crypto';
+import { ChatKeyBackupError, exportEncryptedChatKeyBackup, importEncryptedChatKeyBackup, parseEncryptedChatKeyBackupJson } from './chat-key-recovery';
 import { reconcileStoredChatKeyState, type StoredChatKeyMaterial, type StoredChatKeyState } from './chat-key-store';
 
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
 
-const current: StoredChatKeyMaterial = { privateKey: 'private-current', publicKey: 'public-current', createdAt: '2026-01-01T00:00:00.000Z' };
-const retired: StoredChatKeyMaterial = { privateKey: 'private-retired', publicKey: 'public-retired', createdAt: '2025-01-01T00:00:00.000Z' };
-const unknown: StoredChatKeyMaterial = { privateKey: 'private-unknown', publicKey: 'public-unknown', createdAt: '2026-02-01T00:00:00.000Z' };
+function publicKey(x: string, y: string, reversed = false) {
+  return reversed
+    ? JSON.stringify({ y, x, crv: 'P-256', kty: 'EC' })
+    : JSON.stringify({ kty: 'EC', crv: 'P-256', x, y, ext: true, key_ops: [] });
+}
+
+const current: StoredChatKeyMaterial = { privateKey: 'private-current', publicKey: publicKey('current-x', 'current-y'), createdAt: '2026-01-01T00:00:00.000Z' };
+const retired: StoredChatKeyMaterial = { privateKey: 'private-retired', publicKey: publicKey('retired-x', 'retired-y'), createdAt: '2025-01-01T00:00:00.000Z' };
+const unknown: StoredChatKeyMaterial = { privateKey: 'private-unknown', publicKey: publicKey('unknown-x', 'unknown-y'), createdAt: '2026-02-01T00:00:00.000Z' };
 
 function storedState(overrides: Partial<StoredChatKeyState> = {}): StoredChatKeyState {
   return {
@@ -58,10 +64,27 @@ test('a crash-recovered pending key is promoted only when server-active and devi
   assert.equal(next.pending, null);
 });
 
+test('equivalent P-256 JWK property order reconciles while different key coordinates fail', () => {
+  const reorderedCurrent = publicKey('current-x', 'current-y', true);
+  assert.equal(chatPublicKeysEqual(current.publicKey, reorderedCurrent), true);
+  assert.equal(chatPublicKeysEqual(current.publicKey, unknown.publicKey), false);
+  const next = reconcileStoredChatKeyState(
+    storedState(),
+    [{ publicKey: reorderedCurrent, status: 'ACTIVE' }, { publicKey: retired.publicKey, status: 'RETIRED' }],
+    reorderedCurrent,
+    true,
+  );
+  assert.equal(next.current?.publicKey, current.publicKey);
+  assert.deepEqual(next.history.map((key) => key.publicKey), [retired.publicKey]);
+});
+
 test('wrong password and tampered v1 fields fail authentication without producing imported material', async () => {
   const pair = await generateChatKeyPair();
   const backup = await exportEncryptedChatKeyBackup(pair.privateKey, 'audit-only-recovery-password');
-  await assert.rejects(() => importEncryptedChatKeyBackup(backup, 'wrong-password'));
+  await assert.rejects(
+    () => importEncryptedChatKeyBackup(backup, 'wrong-password'),
+    (error: unknown) => error instanceof ChatKeyBackupError && error.code === 'WRONG_RECOVERY_PASSWORD',
+  );
   for (const field of ['salt', 'iv', 'encryptedPrivateKey'] as const) {
     const tampered = { ...backup, [field]: `${backup[field][0] === 'A' ? 'B' : 'A'}${backup[field].slice(1)}` };
     await assert.rejects(() => importEncryptedChatKeyBackup(tampered, 'audit-only-recovery-password'));
@@ -71,11 +94,17 @@ test('wrong password and tampered v1 fields fail authentication without producin
 test('v1 parser rejects unsupported, malformed, extra, and oversized backup structures', async () => {
   const pair = await generateChatKeyPair();
   const backup = await exportEncryptedChatKeyBackup(pair.privateKey, 'audit-only-recovery-password');
-  await assert.rejects(() => importEncryptedChatKeyBackup({ ...backup, version: 2 }, 'audit-only-recovery-password'));
+  await assert.rejects(
+    () => importEncryptedChatKeyBackup({ ...backup, version: 2 }, 'audit-only-recovery-password'),
+    (error: unknown) => error instanceof ChatKeyBackupError && error.code === 'UNSUPPORTED_BACKUP_VERSION',
+  );
   await assert.rejects(() => importEncryptedChatKeyBackup({ ...backup, extra: 'field' }, 'audit-only-recovery-password'));
   await assert.rejects(() => importEncryptedChatKeyBackup({ ...backup, salt: 'not-base64' }, 'audit-only-recovery-password'));
   await assert.rejects(() => importEncryptedChatKeyBackup({ ...backup, encryptedPrivateKey: 'A'.repeat(100_000) }, 'audit-only-recovery-password'));
-  assert.throws(() => JSON.parse('{malformed'));
+  assert.throws(
+    () => parseEncryptedChatKeyBackupJson('{malformed'),
+    (error: unknown) => error instanceof ChatKeyBackupError && error.code === 'INVALID_BACKUP',
+  );
 });
 
 test('reported failed-restore regression is staged, exact-state, and never reactivates stale local material', async () => {

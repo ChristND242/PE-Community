@@ -1,0 +1,40 @@
+[Unit]
+Description=PE Community host updater
+Documentation=https://github.com/Pona-Ekolo/PE-Community
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=pe-community-updater
+RuntimeDirectory=pe-community-updater
+RuntimeDirectoryMode=0750
+StateDirectory=pe-community-updater
+StateDirectoryMode=0700
+EnvironmentFile=/etc/pe-community-updater/updater.env
+ExecStart=/usr/bin/node /opt/pe-community-updater/dist/server.js
+Restart=on-failure
+RestartSec=5s
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ReadWritePaths=/opt/pe-community-management /opt/pe-community-backups /var/lib/pe-community-updater /run/pe-community-updater
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

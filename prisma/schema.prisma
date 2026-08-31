@@ -26,6 +26,11 @@ enum RsvpStatus {
   DECLINED
 }
 
+enum EventImageSource {
+  UPLOAD
+  EXTERNAL
+}
+
 enum PublicationCoverSource {
   UPLOAD
   EXTERNAL
@@ -205,6 +210,31 @@ enum ProfileLinkVisibility {
   PRIVATE
 }
 
+enum SystemUpdateCheckStatus {
+  UP_TO_DATE
+  UPDATE_AVAILABLE
+  CHECK_FAILED
+  MANUAL_REQUIRED
+  DEVELOPMENT
+  NO_RELEASE_AVAILABLE
+}
+
+enum SystemUpdateRunStatus {
+  PENDING
+  PREFLIGHT
+  BACKUP
+  PULLING
+  VERIFYING
+  MIGRATING
+  DEPLOYING
+  HEALTHCHECK
+  ROLLING_BACK
+  COMPLETED
+  FAILED
+  MANUAL_INTERVENTION_REQUIRED
+  CANCELLED
+}
+
 model User {
   id                   String       @id @default(cuid())
   email                String       @unique
@@ -271,6 +301,8 @@ model User {
   chatPresence         ChatPresence[]
   loginStreaks         UserLoginStreak[]
   loginStreakEvents    UserLoginStreakEvent[]
+  initiatedSystemUpdateRuns SystemUpdateRun[] @relation("SystemUpdateInitiator")
+  initiatedSystemUpdateChecks SystemUpdateCheck[] @relation("SystemUpdateCheckInitiator")
 }
 
 model PasskeyCredential {
@@ -347,7 +379,72 @@ model Community {
   chatMessageReports ChatMessageReport[]
   loginStreaks   UserLoginStreak[]
   loginStreakEvents UserLoginStreakEvent[]
+  systemUpdateChecks SystemUpdateCheck[]
+  systemUpdateRuns SystemUpdateRun[]
   createdAt      DateTime                  @default(now())
+}
+
+model SystemUpdateCheck {
+  id                      String                  @id @default(cuid())
+  communityId             String
+  initiatedByUserId       String?
+  installedVersion        String
+  latestVersion           String?
+  status                  SystemUpdateCheckStatus
+  checkedAt               DateTime                @default(now())
+  lastSuccessfulCheckedAt DateTime?
+  releaseUrl              String?
+  releasePublishedAt      DateTime?
+  releaseNotes            String?
+  releaseMetadataSnapshot Json?
+  errorCategory           String?
+  community               Community               @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  initiatedBy             User?                   @relation("SystemUpdateCheckInitiator", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([communityId, checkedAt])
+  @@index([communityId, status, checkedAt])
+}
+
+model SystemUpdateRun {
+  id                      String                @id
+  communityId             String
+  initiatedByUserId       String?
+  initiatorRole           String
+  sourceIp                String?
+  idempotencyKey          String                @unique
+  installedVersion        String
+  targetVersion           String
+  status                  SystemUpdateRunStatus @default(PENDING)
+  phase                   SystemUpdateRunStatus @default(PENDING)
+  createdAt               DateTime              @default(now())
+  startedAt               DateTime?
+  completedAt             DateTime?
+  failureCode             String?
+  failureSummary          String?
+  rollbackStatus          String                @default("NOT_REQUIRED")
+  releaseMetadataSnapshot Json?
+  lastSequence            Int                   @default(0)
+  community               Community             @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  initiatedBy             User?                 @relation("SystemUpdateInitiator", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+  logs                    SystemUpdateLog[]
+
+  @@index([communityId, createdAt])
+  @@index([communityId, status, createdAt])
+}
+
+model SystemUpdateLog {
+  id        String                @id @default(cuid())
+  runId     String
+  sequence  Int
+  timestamp DateTime
+  level     String
+  phase     SystemUpdateRunStatus
+  eventCode String
+  message   String
+  run       SystemUpdateRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([runId, timestamp])
 }
 
 model CommunityMessageTemplate {
@@ -1049,6 +1146,8 @@ model Event {
   location    String
   onlineUrl   String?
   capacity    Int?
+  imageUrl    String?
+  imageSource EventImageSource?
   community   Community   @relation(fields: [communityId], references: [id])
   rsvps       EventRsvp[]
   tasks       EventTask[]

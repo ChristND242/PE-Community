@@ -12,3 +12,14 @@ export async function requireAdmin(auth: AuthService, cookie: string | undefined
   if (!['owner', 'admin'].includes(user.role)) throw new ForbiddenException('Admin access required.');
   return user;
 }
+
+export async function requireOwner(
+  auth: AuthService,
+  cookie: string | undefined,
+  communityId: string,
+): Promise<RequestUser> {
+  const user = await requireUser(auth, cookie, communityId);
+  if (user.role !== 'owner')
+    throw new ForbiddenException('Owner access required.');
+  return user;
+}

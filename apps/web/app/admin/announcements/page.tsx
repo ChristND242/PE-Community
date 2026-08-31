@@ -35,11 +35,13 @@ type Announcement = {
 type SortKey = 'title' | 'status' | 'updatedAt';
 type FormState = { id?: string; title: string; body: string; authorMode: AnnouncementAuthorMode };
 type EmailSettings = { available: boolean };
-type CurrentUser = { role: string };
+type CurrentUser = { role: string; permissions: string[] };
 type AdminAnnouncementsMode = 'create' | 'view';
 
 const emptyForm: FormState = { title: '', body: '', authorMode: 'USER' };
 const pageSizes = [5, 10, 20, 50];
+const announcementCreatePermission = 'announcements.create';
+const announcementPublishPermission = 'announcements.publish';
 
 export default function AdminAnnouncementsPage() {
   return (
@@ -75,7 +77,9 @@ function AdminAnnouncementsPageContent() {
   const [emailActiveMembers, setEmailActiveMembers] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const locale = lang === 'fr' ? 'fr-FR' : 'en-US';
-  const canPublishAsCommunityTeam = ['owner', 'admin'].includes(currentUser?.role.toLowerCase() ?? '');
+  const canCreate = currentUser?.permissions.includes(announcementCreatePermission) ?? false;
+  const canPublish = currentUser?.permissions.includes(announcementPublishPermission) ?? false;
+  const canPublishAsCommunityTeam = canCreate && ['owner', 'admin'].includes(currentUser?.role.toLowerCase() ?? '');
   const selectedMode = adminAnnouncementsMode(searchParams.get('mode'));
 
   function selectMode(mode: AdminAnnouncementsMode) {
@@ -88,7 +92,6 @@ function AdminAnnouncementsPageContent() {
     setError('');
     try {
       setData(await apiFetch<Announcement[]>(`/admin/${COMMUNITY_ID}/announcements`));
-      setEmailSettings(await apiFetch<EmailSettings>(`/admin/${COMMUNITY_ID}/settings/email`));
     } catch {
       setError(t.admin.announcementsLoadFailed);
     }
@@ -99,6 +102,17 @@ function AdminAnnouncementsPageContent() {
   useEffect(() => {
     void apiFetch<CurrentUser>('/auth/me').then(setCurrentUser).catch(() => setCurrentUser(null));
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!canPublish) {
+      setEmailSettings({ available: false });
+      return;
+    }
+    void apiFetch<EmailSettings>(`/admin/${COMMUNITY_ID}/settings/email`)
+      .then(setEmailSettings)
+      .catch(() => setEmailSettings({ available: false }));
+  }, [canPublish, currentUser]);
 
   const rows = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -142,7 +156,7 @@ function AdminAnnouncementsPageContent() {
   }
 
   async function saveDraft() {
-    if (saving) return;
+    if (saving || !canCreate) return;
     setValidation('');
     if (!form.title.trim() || !form.body.trim()) {
       setValidation(t.admin.announcementValidationFailed);
@@ -181,7 +195,7 @@ function AdminAnnouncementsPageContent() {
   }
 
   async function publish(id: string) {
-    if (publishingId) return;
+    if (publishingId || !canPublish) return;
     setPublishingId(id);
     try {
       const published = await apiFetch<Announcement>(`/admin/${COMMUNITY_ID}/announcements/${id}/publish`, { method: 'POST', body: JSON.stringify({ emailActiveMembers }) });
@@ -287,7 +301,7 @@ function AdminAnnouncementsPageContent() {
 
           <div className="flex flex-col-reverse gap-3 border-t border-white/10 bg-black/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
             {form.id && <button onClick={() => { setForm(emptyForm); setCover(initialPublicationCoverSelection()); setCoverError(''); setValidation(''); }} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white/72 transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-accent/20">{t.common.cancel}</button>}
-            <LoadingButton loading={saving} loadingLabel={t.admin.savingDraft} onClick={saveDraft}>
+            <LoadingButton loading={saving} loadingLabel={t.admin.savingDraft} disabled={!canCreate} onClick={saveDraft}>
               {t.admin.saveDraft}
             </LoadingButton>
           </div>
@@ -350,12 +364,12 @@ function AdminAnnouncementsPageContent() {
                           <td className="px-4 py-4 text-white/58">{formatDate(item.updatedAt ?? item.createdAt, locale)}</td>
                           <td className="px-4 py-4">
                             <div className="flex flex-wrap gap-2">
-                              <button onClick={() => editAnnouncement(item)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-xs font-semibold text-white/70 transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent">
+                              {canCreate && <button onClick={() => editAnnouncement(item)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-xs font-semibold text-white/70 transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent">
                                 <Edit3 size={13} />
                                 {t.common.edit}
-                              </button>
+                              </button>}
                               <Link href={`/admin/announcements/${item.id}`} className="inline-flex items-center rounded-full border border-white/10 px-3 py-1.5 text-xs font-semibold text-white/70 transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent">{t.admin.viewReport}</Link>
-                              {item.status !== 'PUBLISHED' && (
+                              {canPublish && item.status !== 'PUBLISHED' && (
                                 <LoadingButton loading={publishingId === item.id} loadingLabel={t.admin.publishingAnnouncement} disabled={Boolean(publishingId)} onClick={() => publish(item.id)} className="gap-1.5 px-3 py-1.5 text-xs">
                                   <Send size={13} />
                                   {t.admin.publishAnnouncement}

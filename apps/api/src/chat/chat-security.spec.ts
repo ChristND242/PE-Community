@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { webcrypto } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import { assertChatDeviceLimit, chatPublicKeyFingerprint, lockChatDeviceEnrollment } from './chat.service';
+import { assertChatDeviceLimit, chatPublicKeyFingerprint, chatPublicKeysEqual, lockChatDeviceEnrollment } from './chat.service';
 import { generateChatKeyPair } from '../../../web/lib/chat-crypto';
 import { exportEncryptedChatKeyBackup, importEncryptedChatKeyBackup } from '../../../web/lib/chat-key-recovery';
 import { detectClientDeviceInfo, detectClientDeviceInfoSync } from '../../../web/lib/chat-device-info';
@@ -14,6 +14,19 @@ test('chat public-key fingerprint is canonical and excludes JSON property order'
   const first = JSON.stringify({ kty: 'EC', crv: 'P-256', x: 'test-x', y: 'test-y', ext: true });
   const second = JSON.stringify({ y: 'test-y', x: 'test-x', crv: 'P-256', kty: 'EC' });
   assert.equal(chatPublicKeyFingerprint(first), chatPublicKeyFingerprint(second));
+  assert.equal(chatPublicKeysEqual(first, second), true);
+  assert.equal(chatPublicKeysEqual(first, JSON.stringify({ kty: 'EC', crv: 'P-256', x: 'other-x', y: 'test-y' })), false);
+});
+
+test('restore verification uses canonical identity matching for retained and legacy key rows', async () => {
+  const source = await readFile('src/chat/chat.service.ts', 'utf8');
+  const enrollment = source.slice(source.indexOf('async registerMyDeviceKey'), source.indexOf('async verifyRestoredKey'));
+  const verification = source.slice(source.indexOf('async verifyRestoredKey'), source.indexOf('async myDevices'));
+  assert.match(enrollment, /fingerprint: null[\s\S]+chatPublicKeysEqual\(key\.publicKey, publicKey\)/);
+  assert.match(enrollment, /!chatPublicKeysEqual\(retainedKey\.publicKey, publicKey\)/);
+  assert.match(verification, /fingerprint: null[\s\S]+chatPublicKeysEqual\(key\.publicKey, publicKey\)/);
+  assert.match(verification, /!chatPublicKeysEqual\(retained\.publicKey, publicKey\)/);
+  assert.doesNotMatch(`${enrollment}\n${verification}`, /retained(?:Key)?\.publicKey !== publicKey/);
 });
 
 test('active chat device limit accepts only 1 through 8', () => {

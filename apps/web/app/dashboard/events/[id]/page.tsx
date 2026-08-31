@@ -6,20 +6,21 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { AppShell } from '../../../../components/shell';
-import { Card, LoadingButton, StatusBadge, TableErrorState, TableSkeleton } from '../../../../components/ui';
+import { EventRsvpControls, type EventRsvpStatus } from '../../../../components/event-card';
+import { Card, StatusBadge, TableErrorState, TableSkeleton } from '../../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../../lib/api';
 import { statusLabel, useI18n } from '../../../../lib/i18n';
 import { formatDate } from '../../../../lib/utils';
 import { MemberEventTasks } from './event-tasks';
 
-type EventItem = { id: string; title: string; description: string; startsAt: string; location: string; onlineUrl?: string | null; capacity?: number | null; rsvpCounts: { going: number; maybe: number; declined: number }; myRsvp: string | null };
+type EventItem = { id: string; title: string; description: string; startsAt: string; location: string; onlineUrl?: string | null; capacity?: number | null; imageUrl?: string | null; imageSource?: 'UPLOAD' | 'EXTERNAL' | null; rsvpCounts: { going: number; maybe: number; declined: number }; myRsvp: EventRsvpStatus | null };
 
 export default function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { lang, t, timezone } = useI18n();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [error, setError] = useState('');
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<EventRsvpStatus | null>(null);
 
   async function load() {
     setError('');
@@ -32,7 +33,7 @@ export default function EventDetailPage() {
 
   useEffect(() => { load(); }, [id, t.dashboard.eventLoadFailed]);
 
-  async function rsvp(status: string) {
+  async function rsvp(status: EventRsvpStatus) {
     if (pending) return;
     setPending(status);
     try {
@@ -79,11 +80,7 @@ export default function EventDetailPage() {
                   <p>{event.rsvpCounts.maybe} {t.dashboard.maybe}</p>
                   <p>{event.rsvpCounts.declined} {t.dashboard.notGoing}</p>
                 </div>
-                <div className="mt-5 grid gap-2">
-                  <LoadingButton loading={pending === 'GOING'} loadingLabel={t.dashboard.savingRsvp} disabled={!!pending} onClick={() => rsvp('GOING')}>{t.dashboard.going}</LoadingButton>
-                  <LoadingButton loading={pending === 'MAYBE'} loadingLabel={t.dashboard.savingRsvp} disabled={!!pending} className="bg-cyan-300" onClick={() => rsvp('MAYBE')}>{t.dashboard.maybe}</LoadingButton>
-                  <LoadingButton loading={pending === 'DECLINED'} loadingLabel={t.dashboard.savingRsvp} disabled={!!pending} className="bg-white/10 text-white hover:bg-white/15" onClick={() => rsvp('DECLINED')}>{t.dashboard.notGoing}</LoadingButton>
-                </div>
+                <div className="mt-5"><EventRsvpControls current={event.myRsvp} pending={pending} labels={{ going: t.dashboard.going, maybe: t.dashboard.maybe, declined: t.dashboard.notGoing, saving: t.dashboard.savingRsvp }} onSelect={rsvp} /></div>
               </Card>
             </div>
             <MemberEventTasks eventId={id} />

@@ -1,6 +1,7 @@
 export const SOCKET_PATH = '/socket.io' as const;
 export const CHAT_NAMESPACE = '/chat' as const;
 export const EVENT_TASKS_NAMESPACE = '/event-tasks' as const;
+export const SYSTEM_UPDATES_NAMESPACE = '/system-updates' as const;
 
 const configuredRealtimeOrigin = process.env.NEXT_PUBLIC_REALTIME_ORIGIN;
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, CalendarClock, CalendarDays, CalendarRange, ChevronDown, ClipboardCheck, ClipboardList, FileText, Flame, KeyRound, LayoutDashboard, ListChecks, LogOut, Mail, MessageCircle, Newspaper, Settings, Shield, ShieldCheck, SlidersHorizontal, UserRound, Users, X } from 'lucide-react';
+import { Bell, CalendarClock, CalendarDays, CalendarRange, ChevronDown, ClipboardCheck, ClipboardList, FileText, Flame, KeyRound, LayoutDashboard, ListChecks, LogOut, Mail, MessageCircle, Newspaper, Settings, Shield, ShieldCheck, SlidersHorizontal, UserRound, Users, Wrench, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -12,6 +12,7 @@ import { apiUrl, COMMUNITY_ID, handleUnauthorizedResponse } from '../lib/api';
 import { useAdminNotifications } from '../hooks/use-admin-notifications';
 import { useMemberNotifications } from '../hooks/use-member-notifications';
 import { useChatUnreadCount } from '../hooks/use-chat-unread-count';
+import { useSystemUpdateBadge } from '../hooks/use-system-update-badge';
 import { useGlobalNotificationToasts } from '../hooks/use-global-notification-toasts';
 import { taskNotificationHref } from '../lib/task-notification-link';
 import { publishSessionActivityMessage } from '../lib/session-activity';
@@ -79,6 +80,8 @@ export function AppShell({ children, admin = false }: { children: React.ReactNod
   const memberNotificationsEnabled = !admin && Boolean(user);
   const chatUnreadEnabled = Boolean(user && hasPermission(user, PERMISSIONS.chatView));
   const { count: chatUnreadCount } = useChatUnreadCount(chatUnreadEnabled);
+  const canViewSystemUpdates = Boolean(admin && user?.role === 'owner' && hasPermission(user, PERMISSIONS.systemUpdateView));
+  const systemUpdateBadge = useSystemUpdateBadge(canViewSystemUpdates);
   const { notifications: adminNotifications, notificationsLoading, notificationsInitialized, unreadCount: adminUnreadNotifications, markAsRead: dismissAdminNotification } = useAdminNotifications(adminNotificationsEnabled, adminNotificationsOpen);
   const { notifications: memberNotifications, loading: memberNotificationsLoading, notificationsInitialized: memberNotificationsInitialized, unreadCount: memberUnreadNotifications, markAsRead: dismissMemberNotification } = useMemberNotifications(memberNotificationsEnabled, memberNotificationsOpen);
   useGlobalNotificationToasts({
@@ -96,6 +99,7 @@ export function AppShell({ children, admin = false }: { children: React.ReactNod
         ...(hasPermission(user, PERMISSIONS.settingsRemindersManage) ? [{ href: '/admin/settings/reminders', label: t.admin.settingsReminders, icon: CalendarClock }] : []),
         ...(hasPermission(user, PERMISSIONS.settingsTemplatesManage) ? [{ href: '/admin/settings/templates', label: t.admin.settingsTemplates, icon: FileText }] : []),
         ...(hasPermission(user, PERMISSIONS.settingsNotificationsManage) ? [{ href: '/admin/settings/notifications', label: t.admin.settingsNotifications, icon: Bell }] : []),
+        ...(canViewSystemUpdates ? [{ href: '/admin/settings/system-updates', label: t.systemUpdates.title, icon: Wrench }] : []),
       ]
     : [];
   const adminAuditSections = admin
@@ -352,6 +356,7 @@ export function AppShell({ children, admin = false }: { children: React.ReactNod
             settingsMenuOpen={settingsMenuOpen}
             setSettingsMenuOpen={setSettingsMenuOpen}
             settingsMenuRef={settingsMenuRef}
+            badgeCount={systemUpdateBadge}
             t={t}
           />
         </nav>
@@ -492,6 +497,7 @@ export function AppShell({ children, admin = false }: { children: React.ReactNod
                   active={pathname.startsWith(admin ? '/admin/settings' : '/dashboard/settings')}
                   adminSettingsSections={adminSettingsSections}
                   mobileSettingsOpen={mobileSettingsOpen}
+                  badgeCount={systemUpdateBadge}
                   setMobileSettingsOpen={setMobileSettingsOpen}
                   closeMobileMenu={() => setMobileMenuOpen(false)}
                   t={t}
@@ -551,6 +557,7 @@ function SidebarSettingsLink({
   settingsMenuOpen,
   setSettingsMenuOpen,
   settingsMenuRef,
+  badgeCount,
   t,
 }: {
   link: SidebarLink;
@@ -559,6 +566,7 @@ function SidebarSettingsLink({
   settingsMenuOpen: boolean;
   setSettingsMenuOpen: Dispatch<SetStateAction<boolean>>;
   settingsMenuRef: RefObject<HTMLDivElement | null>;
+  badgeCount: number;
   t: ReturnType<typeof useI18n>['t'];
 }) {
   if (link.settingsMenu && adminSettingsSections.length > 0) {
@@ -568,13 +576,13 @@ function SidebarSettingsLink({
           type="button"
           aria-expanded={settingsMenuOpen}
           aria-controls="admin-settings-menu"
-          aria-label={settingsMenuOpen ? t.admin.closeSettingsMenu : t.admin.openSettingsSectionMenu}
+          aria-label={`${settingsMenuOpen ? t.admin.closeSettingsMenu : t.admin.openSettingsSectionMenu}${badgeCount > 0 ? `, ${t.systemUpdates.updateAvailable}` : ''}`}
           onClick={() => setSettingsMenuOpen((open) => !open)}
           className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${active ? 'border border-accent/20 bg-accent/15 text-accent shadow-lg shadow-accent/5' : 'border border-transparent text-white/62 hover:border-white/10 hover:bg-white/[0.055] hover:text-white'}`}
         >
           <link.icon size={17} />
           <span className="font-medium">{link.label}</span>
-          <ChevronDown size={15} className={`ml-auto transition ${settingsMenuOpen ? 'rotate-180' : ''}`} />
+          <span className="ml-auto flex items-center gap-2">{badgeCount > 0 && <span aria-hidden="true" className="grid h-5 min-w-5 place-items-center rounded-full bg-emerald-300 px-1.5 text-[10px] font-bold text-emerald-950">{badgeCount}</span>}<ChevronDown size={15} className={`transition ${settingsMenuOpen ? 'rotate-180' : ''}`} /></span>
         </button>
         {settingsMenuOpen && (
           <div id="admin-settings-menu" role="menu" aria-label={t.admin.settingsSections} className="absolute bottom-full left-2 z-30 mb-2 w-64 rounded-2xl border border-white/10 bg-[#07100d]/98 p-2 shadow-2xl shadow-black/45 backdrop-blur-xl">
@@ -603,6 +611,7 @@ function MobileSettingsLink({
   active,
   adminSettingsSections,
   mobileSettingsOpen,
+  badgeCount,
   setMobileSettingsOpen,
   closeMobileMenu,
   t,
@@ -611,6 +620,7 @@ function MobileSettingsLink({
   active: boolean;
   adminSettingsSections: Array<{ href: string; label: string; icon: LucideIcon }>;
   mobileSettingsOpen: boolean;
+  badgeCount: number;
   setMobileSettingsOpen: Dispatch<SetStateAction<boolean>>;
   closeMobileMenu: () => void;
   t: ReturnType<typeof useI18n>['t'];
@@ -618,10 +628,10 @@ function MobileSettingsLink({
   if (link.settingsMenu && adminSettingsSections.length > 0) {
     return (
       <div>
-        <button type="button" aria-expanded={mobileSettingsOpen} aria-controls="mobile-admin-settings-menu" onClick={() => setMobileSettingsOpen((open) => !open)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${active ? 'border border-accent/20 bg-accent/15 text-accent' : 'border border-transparent text-white/68 hover:border-white/10 hover:bg-white/[0.055] hover:text-white'}`}>
+        <button type="button" aria-expanded={mobileSettingsOpen} aria-controls="mobile-admin-settings-menu" aria-label={`${link.label}${badgeCount > 0 ? `, ${t.systemUpdates.updateAvailable}` : ''}`} onClick={() => setMobileSettingsOpen((open) => !open)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${active ? 'border border-accent/20 bg-accent/15 text-accent' : 'border border-transparent text-white/68 hover:border-white/10 hover:bg-white/[0.055] hover:text-white'}`}>
           <link.icon size={17} />
           <span className="font-medium">{link.label}</span>
-          <ChevronDown size={15} className={`ml-auto transition ${mobileSettingsOpen ? 'rotate-180' : ''}`} />
+          <span className="ml-auto flex items-center gap-2">{badgeCount > 0 && <span aria-hidden="true" className="grid h-5 min-w-5 place-items-center rounded-full bg-emerald-300 px-1.5 text-[10px] font-bold text-emerald-950">{badgeCount}</span>}<ChevronDown size={15} className={`transition ${mobileSettingsOpen ? 'rotate-180' : ''}`} /></span>
         </button>
         {mobileSettingsOpen && (
           <div id="mobile-admin-settings-menu" className="mt-1 space-y-1 rounded-xl border border-white/10 bg-black/20 p-1.5" aria-label={t.admin.settingsSections}>

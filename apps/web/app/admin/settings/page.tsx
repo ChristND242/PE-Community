@@ -20,6 +20,7 @@ import { apiFetch, apiUrl, COMMUNITY_ID, userFacingApiError } from '../../../lib
 import { useI18n } from '../../../lib/i18n';
 import { PERMISSIONS, hasPermission } from '../../../lib/permissions';
 import { cn } from '../../../lib/utils';
+import { SystemUpdatesSettings } from '../../../components/system-updates-settings';
 
 type ReminderSettings = {
   birthdayReminderEnabled: boolean;
@@ -152,7 +153,7 @@ type MessageTemplate = {
 
 type MessageTemplateGroups = Record<MessageTemplateChannel, MessageTemplate[]>;
 
-type TabKey = 'profile' | 'general' | 'security' | 'reminders' | 'templates' | 'notifications';
+type TabKey = 'profile' | 'general' | 'security' | 'reminders' | 'templates' | 'notifications' | 'system-updates';
 type CurrentUser = { role: string; permissions?: string[] };
 type TemplateGroup = 'notifications' | 'email';
 
@@ -245,6 +246,7 @@ export default function AdminSettingsPage() {
   const canManageReminders = hasPermission(currentUser, PERMISSIONS.settingsRemindersManage);
   const canManageTemplates = hasPermission(currentUser, PERMISSIONS.settingsTemplatesManage);
   const canManageNotifications = hasPermission(currentUser, PERMISSIONS.settingsNotificationsManage);
+  const canViewSystemUpdates = currentUser?.role === 'owner' && hasPermission(currentUser, PERMISSIONS.systemUpdateView);
   const canManageChatGovernance = hasPermission(currentUser, PERMISSIONS.chatDeviceLimitManage)
     || hasPermission(currentUser, PERMISSIONS.chatDevicesView)
     || hasPermission(currentUser, PERMISSIONS.chatStorageView);
@@ -729,6 +731,7 @@ export default function AdminSettingsPage() {
     ...(canManageReminders ? [{ key: 'reminders' as const, label: t.admin.settingsReminders, description: t.admin.reminderSettingsDescription, icon: CalendarClock }] : []),
     ...(canManageTemplates ? [{ key: 'templates' as const, label: t.admin.settingsTemplates, description: t.admin.settingsTemplatesDescription, icon: FileText }] : []),
     ...(canManageNotifications ? [{ key: 'notifications' as const, label: t.admin.settingsNotifications, description: t.admin.settingsNotificationsDescription, icon: Bell }] : []),
+    ...(canViewSystemUpdates ? [{ key: 'system-updates' as const, label: t.systemUpdates.title, description: t.systemUpdates.description, icon: Wrench }] : []),
   ];
   const currentTab = tabs.find((tab) => tab.key === activeTab) ?? tabs[0] ?? null;
 
@@ -1360,6 +1363,9 @@ export default function AdminSettingsPage() {
                     <Actions dirty={notificationDirty} saving={saving} disabled={!canManageNotifications} saveLabel={t.common.saveChanges} discardLabel={t.admin.discardChanges} onSave={saveNotificationSettings} onDiscard={() => setNotificationSettings(savedNotificationSettings)} />
                   </div>
                 </div>
+              )}
+              {activeTab === 'system-updates' && currentUser && (
+                <SystemUpdatesSettings user={currentUser} />
               )}
               </div>
               </div>

@@ -1,4 +1,4 @@
-import { exportPrivateKey, exportPublicKey, generateChatKeyPair, importPrivateKey } from './chat-crypto';
+import { chatPublicKeyIdentifier, chatPublicKeysEqual, exportPrivateKey, exportPublicKey, generateChatKeyPair, importPrivateKey } from './chat-crypto';
 import { detectClientDeviceInfoSync } from './chat-device-info';
 
 const databaseName = 'pe-community-chat-keys';
@@ -87,7 +87,7 @@ export async function commitStagedLocalChatKey(userId: string, communityId: stri
   const database = await openDatabase();
   const id = keyId(userId, communityId);
   const state = normalizeStoredState(await readRawStoredKey(database, id), id);
-  if (!state.pending || state.pending.publicKey !== expectedPublicKey) throw new Error('Pending chat identity is unavailable.');
+  if (!state.pending || !chatPublicKeysEqual(state.pending.publicKey, expectedPublicKey)) throw new Error('Pending chat identity is unavailable.');
   const next = commitMaterial(state, state.pending);
   await writeStoredKey(database, next);
   return importMaterial(next.current!);
@@ -98,7 +98,7 @@ export async function promoteRetainedLocalChatKey(userId: string, communityId: s
   const id = keyId(userId, communityId);
   const state = normalizeStoredState(await readRawStoredKey(database, id), id);
   const material = [state.current, ...state.history, state.pending, ...state.quarantined]
-    .find((candidate) => candidate?.publicKey === publicKey);
+    .find((candidate) => candidate && chatPublicKeysEqual(candidate.publicKey, publicKey));
   if (!material) throw new Error('Retained chat identity is unavailable.');
   const next = commitMaterial(state, material);
   await writeStoredKey(database, next);
@@ -113,8 +113,8 @@ export async function storeHistoricalLocalChatKey(userId: string, communityId: s
   const material = { privateKey, publicKey, createdAt: new Date().toISOString() };
   await writeStoredKey(database, {
     ...state,
-    history: dedupeMaterials([...state.history, ...(state.current?.publicKey === publicKey ? [] : [material])]),
-    pending: state.pending?.publicKey === publicKey ? null : state.pending,
+    history: dedupeMaterials([...state.history, ...(state.current && chatPublicKeysEqual(state.current.publicKey, publicKey) ? [] : [material])]),
+    pending: state.pending && chatPublicKeysEqual(state.pending.publicKey, publicKey) ? null : state.pending,
   });
   return { privateKey: imported, publicKey };
 }
@@ -149,7 +149,7 @@ export async function reconcileLocalChatKeys(
   await writeStoredKey(database, reconciled);
   const keyRing = await Promise.all(dedupeMaterials([...(reconciled.current ? [reconciled.current] : []), ...reconciled.history]).map(importMaterial));
   const activeCandidate = activePublicKey
-    ? keyRing.find((candidate) => candidate.publicKey === activePublicKey) ?? null
+    ? keyRing.find((candidate) => chatPublicKeysEqual(candidate.publicKey, activePublicKey)) ?? null
     : null;
   return {
     current: reconciled.current ? await importMaterial(reconciled.current) : null,
@@ -165,21 +165,26 @@ export function reconcileStoredChatKeyState(
   activePublicKey: string | null,
   deviceAuthorized: boolean,
 ): StoredChatKeyState {
-  const serverByPublicKey = new Map(serverKeys.map((key) => [key.publicKey, key]));
+  const serverByPublicKey = new Map(serverKeys.flatMap((key) => {
+    const identifier = chatPublicKeyIdentifier(key.publicKey);
+    return identifier ? [[identifier, key] as const] : [];
+  }));
   const allMaterials = dedupeMaterials([
     ...(state.current ? [state.current] : []),
     ...state.history,
     ...(state.pending ? [state.pending] : []),
     ...state.quarantined,
   ]);
-  const activeCurrent = deviceAuthorized && activePublicKey
-    ? allMaterials.find((material) => material.publicKey === activePublicKey && serverByPublicKey.get(material.publicKey)?.status === 'ACTIVE') ?? null
+  const activeIdentifier = activePublicKey ? chatPublicKeyIdentifier(activePublicKey) : null;
+  const activeCurrent = deviceAuthorized && activeIdentifier
+    ? allMaterials.find((material) => chatPublicKeyIdentifier(material.publicKey) === activeIdentifier && serverByPublicKey.get(activeIdentifier)?.status === 'ACTIVE') ?? null
     : null;
   const history: StoredChatKeyMaterial[] = [];
   const quarantined: StoredChatKeyMaterial[] = [];
   for (const material of allMaterials) {
-    if (material.publicKey === activeCurrent?.publicKey) continue;
-    const serverKey = serverByPublicKey.get(material.publicKey);
+    if (activeCurrent && chatPublicKeysEqual(material.publicKey, activeCurrent.publicKey)) continue;
+    const identifier = chatPublicKeyIdentifier(material.publicKey);
+    const serverKey = identifier ? serverByPublicKey.get(identifier) : undefined;
     if (serverKey && serverKey.status !== 'REVOKED') history.push(material);
     else quarantined.push(material);
   }
@@ -223,16 +228,16 @@ function commitMaterial(state: StoredChatKeyState, material: StoredChatKeyMateri
     ...state,
     current: material,
     history: dedupeMaterials([
-      ...(state.current && state.current.publicKey !== material.publicKey ? [state.current] : []),
-      ...state.history.filter((key) => key.publicKey !== material.publicKey),
+      ...(state.current && !chatPublicKeysEqual(state.current.publicKey, material.publicKey) ? [state.current] : []),
+      ...state.history.filter((key) => !chatPublicKeysEqual(key.publicKey, material.publicKey)),
     ]),
     pending: null,
-    quarantined: state.quarantined.filter((key) => key.publicKey !== material.publicKey),
+    quarantined: state.quarantined.filter((key) => !chatPublicKeysEqual(key.publicKey, material.publicKey)),
   };
 }
 
 function dedupeMaterials(materials: StoredChatKeyMaterial[]) {
-  return materials.filter((key, index, all) => all.findIndex((candidate) => candidate.publicKey === key.publicKey) === index);
+  return materials.filter((key, index, all) => all.findIndex((candidate) => chatPublicKeysEqual(candidate.publicKey, key.publicKey)) === index);
 }
 
 async function importMaterial(material: StoredChatKeyMaterial): Promise<LocalChatKeyPair> {

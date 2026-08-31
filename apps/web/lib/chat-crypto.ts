@@ -19,7 +19,7 @@ export async function generateChatKeyPair(): Promise<ChatKeyPair> {
 }
 
 export async function exportPublicKey(publicKey: CryptoKey) {
-  return JSON.stringify(await crypto.subtle.exportKey('jwk', publicKey));
+  return canonicalChatPublicKeyJson(await crypto.subtle.exportKey('jwk', publicKey));
 }
 
 export async function exportPrivateKey(privateKey: CryptoKey) {
@@ -44,6 +44,28 @@ export async function importPrivateKey(privateKey: string) {
     true,
     ['deriveKey'],
   );
+}
+
+export function canonicalChatPublicKeyJson(publicKey: string | JsonWebKey) {
+  const parsed = typeof publicKey === 'string' ? JSON.parse(publicKey) as JsonWebKey : publicKey;
+  if (parsed.kty !== 'EC' || parsed.crv !== 'P-256' || !parsed.x || !parsed.y) throw new Error('Invalid chat public key.');
+  return JSON.stringify({ kty: 'EC', crv: 'P-256', x: parsed.x, y: parsed.y, ext: true, key_ops: [] });
+}
+
+export function chatPublicKeyIdentifier(publicKey: string) {
+  try {
+    const parsed = JSON.parse(publicKey) as JsonWebKey;
+    if (parsed.kty !== 'EC' || parsed.crv !== 'P-256' || !parsed.x || !parsed.y) return null;
+    return JSON.stringify({ crv: parsed.crv, kty: parsed.kty, x: parsed.x, y: parsed.y });
+  } catch {
+    return null;
+  }
+}
+
+export function chatPublicKeysEqual(first: string, second: string) {
+  const firstIdentifier = chatPublicKeyIdentifier(first);
+  const secondIdentifier = chatPublicKeyIdentifier(second);
+  return firstIdentifier !== null && firstIdentifier === secondIdentifier;
 }
 
 export async function deriveSharedAesKey(privateKey: CryptoKey, publicKey: CryptoKey) {

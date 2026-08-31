@@ -7,10 +7,12 @@ export type AvatarUploadFile = {
   originalname?: string;
 };
 
+export type EventImageUploadFile = AvatarUploadFile;
 export type PublicationCoverUploadFile = AvatarUploadFile;
 
 export const maxAvatarUploadSize = 5 * 1024 * 1024;
-export const maxPublicationCoverUploadSize = 5 * 1024 * 1024;
+export const maxEventImageUploadSize = 5 * 1024 * 1024;
+export const maxPublicationCoverUploadSize = maxEventImageUploadSize;
 
 const avatarMimeExtensions = new Map([
   ['image/jpeg', '.jpg'],
@@ -45,6 +47,24 @@ export function hasValidAvatarSignature(file: AvatarUploadFile) {
 export function avatarPublicUrl(filename: string) {
   const baseUrl = (process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`).replace(/\/$/, '');
   return `${baseUrl}/uploads/avatars/${filename}`;
+}
+
+export function eventImageUploadDir() {
+  if (process.env.UPLOADS_DIR) return join(process.env.UPLOADS_DIR, 'event-images');
+  return join(__dirname, '..', 'uploads', 'event-images');
+}
+
+export function eventImageUploadExtension(file: EventImageUploadFile) {
+  return avatarUploadExtension(file);
+}
+
+export function hasValidEventImageSignature(file: EventImageUploadFile) {
+  return hasValidAvatarSignature(file);
+}
+
+export function eventImagePublicUrl(filename: string) {
+  const baseUrl = (process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`).replace(/\/$/, '');
+  return `${baseUrl}/uploads/event-images/${filename}`;
 }
 
 export function publicationCoverUploadDir() {

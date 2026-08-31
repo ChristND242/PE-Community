@@ -1,4 +1,4 @@
-import { CHAT_ENCRYPTION_ALGORITHM, exportPrivateKey, importPrivateKey } from './chat-crypto';
+import { CHAT_ENCRYPTION_ALGORITHM, canonicalChatPublicKeyJson, exportPrivateKey, importPrivateKey } from './chat-crypto';
 
 const backupType = 'pe-community-chat-key-backup';
 const backupVersion = 1;
@@ -31,6 +31,23 @@ export type ImportedChatKeyBackup = {
   publicKeyJson: string;
 };
 
+export type ChatKeyBackupErrorCode = 'INVALID_BACKUP' | 'UNSUPPORTED_BACKUP_VERSION' | 'WRONG_RECOVERY_PASSWORD' | 'BACKUP_CORRUPTED';
+
+export class ChatKeyBackupError extends Error {
+  constructor(readonly code: ChatKeyBackupErrorCode) {
+    super(code);
+    this.name = 'ChatKeyBackupError';
+  }
+}
+
+export function parseEncryptedChatKeyBackupJson(value: string) {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new ChatKeyBackupError('INVALID_BACKUP');
+  }
+}
+
 export async function exportEncryptedChatKeyBackup(privateKey: CryptoKey, recoveryPassword: string): Promise<EncryptedChatKeyBackup> {
   const privateKeyJson = await exportPrivateKey(privateKey);
   const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -53,23 +70,24 @@ export async function exportEncryptedChatKeyBackup(privateKey: CryptoKey, recove
 export async function importEncryptedChatKeyBackup(backup: unknown, recoveryPassword: string): Promise<ImportedChatKeyBackup> {
   const parsed = parseBackup(backup);
   const encryptionKey = await deriveBackupEncryptionKey(recoveryPassword, base64ToBytes(parsed.salt));
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: toArrayBuffer(base64ToBytes(parsed.iv)) },
-    encryptionKey,
-    base64ToBytes(parsed.encryptedPrivateKey),
-  );
-  const privateKeyJson = decoder.decode(decrypted);
-  const privateJwk = parsePrivateJwk(privateKeyJson);
-  const privateKey = await importPrivateKey(privateKeyJson);
-  const publicKeyJson = JSON.stringify({
-    kty: privateJwk.kty,
-    crv: privateJwk.crv,
-    x: privateJwk.x,
-    y: privateJwk.y,
-    ext: true,
-    key_ops: [],
-  });
-  return { privateKey, privateKeyJson, publicKeyJson };
+  let decrypted: ArrayBuffer;
+  try {
+    decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: toArrayBuffer(base64ToBytes(parsed.iv)) },
+      encryptionKey,
+      base64ToBytes(parsed.encryptedPrivateKey),
+    );
+  } catch {
+    throw new ChatKeyBackupError('WRONG_RECOVERY_PASSWORD');
+  }
+  try {
+    const privateKeyJson = decoder.decode(decrypted);
+    const privateJwk = parsePrivateJwk(privateKeyJson);
+    const privateKey = await importPrivateKey(privateKeyJson);
+    return { privateKey, privateKeyJson, publicKeyJson: canonicalChatPublicKeyJson(privateJwk) };
+  } catch {
+    throw new ChatKeyBackupError('BACKUP_CORRUPTED');
+  }
 }
 
 function deriveBackupEncryptionKey(recoveryPassword: string, salt: Uint8Array) {
@@ -94,9 +112,12 @@ function deriveBackupEncryptionKey(recoveryPassword: string, salt: Uint8Array) {
 }
 
 function parseBackup(value: unknown): EncryptedChatKeyBackup {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid backup.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ChatKeyBackupError('INVALID_BACKUP');
   const backup = value as Partial<EncryptedChatKeyBackup>;
   const keys = Object.keys(value);
+  if (typeof backup.version === 'number' && backup.version !== backupVersion) {
+    throw new ChatKeyBackupError('UNSUPPORTED_BACKUP_VERSION');
+  }
   if (
     keys.length !== backupFields.length ||
     keys.some((key) => !backupFields.includes(key)) ||
@@ -115,12 +136,21 @@ function parseBackup(value: unknown): EncryptedChatKeyBackup {
     backup.encryptedPrivateKey.length > maxEncodedFieldLength ||
     !Number.isFinite(Date.parse(backup.createdAt))
   ) {
-    throw new Error('Invalid backup.');
+    throw new ChatKeyBackupError('INVALID_BACKUP');
   }
-  const salt = base64ToBytes(backup.salt, backupSaltBytes);
-  const iv = base64ToBytes(backup.iv, backupIvBytes);
-  const encryptedPrivateKey = base64ToBytes(backup.encryptedPrivateKey, maxEncryptedPrivateKeyBytes);
-  if (salt.length !== backupSaltBytes || iv.length !== backupIvBytes || encryptedPrivateKey.length < 17) throw new Error('Invalid backup.');
+  let salt: Uint8Array;
+  let iv: Uint8Array;
+  let encryptedPrivateKey: Uint8Array;
+  try {
+    salt = base64ToBytes(backup.salt, backupSaltBytes);
+    iv = base64ToBytes(backup.iv, backupIvBytes);
+    encryptedPrivateKey = base64ToBytes(backup.encryptedPrivateKey, maxEncryptedPrivateKeyBytes);
+  } catch {
+    throw new ChatKeyBackupError('BACKUP_CORRUPTED');
+  }
+  if (salt.length !== backupSaltBytes || iv.length !== backupIvBytes || encryptedPrivateKey.length < 17) {
+    throw new ChatKeyBackupError('BACKUP_CORRUPTED');
+  }
   return backup as EncryptedChatKeyBackup;
 }
 

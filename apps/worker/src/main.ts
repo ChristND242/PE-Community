@@ -3,7 +3,7 @@ import type { EmailLocale, EmailTemplateKey, LocalizedEmailTemplate } from '@pe/
 import { evaluateAutomationExecution, parseSecurityRetentionDays } from '@pe/shared';
 import { Queue, Worker } from 'bullmq';
 import { createDecipheriv, createHash } from 'crypto';
-import { unlink } from 'fs/promises';
+import { unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
 import { createRequire } from 'module';
@@ -34,7 +34,7 @@ const securityRetentionConfig = {
   sessionRetentionDays: parseSecurityRetentionDays('SESSION_SECURITY_METADATA_RETENTION_DAYS', process.env.SESSION_SECURITY_METADATA_RETENTION_DAYS),
 };
 
-new Worker(
+const emailWorker = new Worker(
   emailQueueName,
   async (job) => {
     if (job.name !== 'send-email') return;
@@ -45,7 +45,7 @@ new Worker(
   { connection },
 );
 
-new Worker(
+const notificationWorker = new Worker(
   notificationQueueName,
   async (job) => {
     if (job.name === 'chat-media-delete') {
@@ -107,6 +107,24 @@ void notificationQueue.add('security-retention-cleanup', {}, {
 });
 
 console.log(`[worker] listening on ${emailQueueName} and ${notificationQueueName}`);
+
+const workerHealthFile = process.env.WORKER_HEALTH_FILE ?? '/tmp/pe-community-worker-ready';
+async function refreshWorkerReadiness() {
+  try {
+    if (!emailWorker.isRunning() || !notificationWorker.isRunning())
+      throw new Error('Worker processing loop is not running.');
+    await Promise.all([
+      emailQueue.getJobCounts('waiting'),
+      notificationQueue.getJobCounts('waiting'),
+      prisma.$queryRaw`SELECT 1`,
+    ]);
+    await writeFile(workerHealthFile, `${Date.now()}\n`, { mode: 0o600 });
+  } catch {
+    await unlink(workerHealthFile).catch(() => undefined);
+  }
+}
+void refreshWorkerReadiness();
+setInterval(() => void refreshWorkerReadiness(), 10_000).unref();
 
 type RegistrationNotificationJob = {
   category:

@@ -965,6 +965,13 @@ export class ChatService {
         },
         orderBy: { version: 'desc' },
       });
+      if (!retainedKey) {
+        const legacyKeys = await tx.chatDeviceKey.findMany({
+          where: { userId: user.id, communityId: user.communityId, fingerprint: null },
+          orderBy: { version: 'desc' },
+        });
+        retainedKey = legacyKeys.find((key) => chatPublicKeysEqual(key.publicKey, publicKey)) ?? null;
+      }
       if (retainedKey?.fingerprint === null) {
         retainedKey = await tx.chatDeviceKey.update({
           where: { id: retainedKey.id },
@@ -1028,7 +1035,7 @@ export class ChatService {
           });
         }
       } else if (requestedMode === 'restore') {
-        if (!retainedKey || retainedKey.publicKey !== publicKey) throw new ConflictException('CHAT_BACKUP_KEY_MISMATCH');
+        if (!retainedKey || !chatPublicKeysEqual(retainedKey.publicKey, publicKey)) throw new ConflictException('CHAT_BACKUP_KEY_MISMATCH');
         if (retainedKey.status === 'REVOKED') throw new ConflictException('CHAT_KEY_REVOKED');
         if (retainedKey.status !== 'ACTIVE') throw new ConflictException('CHAT_RETIRED_KEY_HISTORY_ONLY');
       } else {
@@ -1096,7 +1103,7 @@ export class ChatService {
     await this.permissions.requirePermission(user, PERMISSIONS.chatView, user.communityId);
     const publicKey = boundedString(body.publicKey, 'Public key is required.', maxPublicKeyLength);
     const fingerprint = chatPublicKeyFingerprint(publicKey);
-    const retained = await this.prisma.chatDeviceKey.findFirst({
+    let retained = await this.prisma.chatDeviceKey.findFirst({
       where: {
         userId: user.id,
         communityId: user.communityId,
@@ -1105,7 +1112,15 @@ export class ChatService {
       select: { id: true, publicKey: true, version: true, status: true },
       orderBy: { version: 'desc' },
     });
-    if (!retained || retained.publicKey !== publicKey) {
+    if (!retained) {
+      const legacyKeys = await this.prisma.chatDeviceKey.findMany({
+        where: { userId: user.id, communityId: user.communityId, fingerprint: null },
+        select: { id: true, publicKey: true, version: true, status: true },
+        orderBy: { version: 'desc' },
+      });
+      retained = legacyKeys.find((key) => chatPublicKeysEqual(key.publicKey, publicKey)) ?? null;
+    }
+    if (!retained || !chatPublicKeysEqual(retained.publicKey, publicKey)) {
       await this.prisma.auditLog.create({
         data: {
           communityId: user.communityId,
@@ -2464,6 +2479,14 @@ export function chatPublicKeyFingerprint(publicKey: string) {
   }
   const canonical = JSON.stringify({ crv: parsed.crv, kty: parsed.kty, x: parsed.x, y: parsed.y });
   return createHash('sha256').update(canonical).digest('base64url');
+}
+
+export function chatPublicKeysEqual(first: string, second: string) {
+  try {
+    return chatPublicKeyFingerprint(first) === chatPublicKeyFingerprint(second);
+  } catch {
+    return false;
+  }
 }
 
 function publicChatDevice(

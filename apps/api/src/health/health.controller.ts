@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { currentSystemVersion } from '../system-updates/system-version';
 
 @Controller('health')
 export class HealthController {
@@ -8,6 +9,6 @@ export class HealthController {
   @Get()
   async health() {
     await this.prisma.$queryRaw`SELECT 1`;
-    return { ok: true, service: 'pe-community-api' };
+    return { ok: true, service: 'pe-community-api', version: currentSystemVersion().version };
   }
 }

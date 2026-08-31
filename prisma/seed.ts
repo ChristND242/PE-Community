@@ -286,6 +286,10 @@ async function main() {
     ['chat.storage.view', 'View chat media storage'],
     ['chat.storage.manage', 'Manage chat media storage'],
     ['chat.media.delete', 'Delete encrypted chat media'],
+    ['systemUpdate.view', 'View system updates'],
+    ['systemUpdate.check', 'Check for system updates'],
+    ['systemUpdate.execute', 'Install system updates'],
+    ['systemUpdate.history', 'View system update history'],
   ]);
 
   for (const key of ALL_PERMISSIONS) {

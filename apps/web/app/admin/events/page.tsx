@@ -7,9 +7,11 @@ import { Suspense, useEffect, useMemo, useState, type KeyboardEvent } from 'reac
 import { toast } from 'sonner';
 import { AppSelect } from '../../../components/app-select';
 import { EventBrowseView } from '../../../components/event-browse-view';
+import { EventImageField, eventImageValidation, eventRequestBody, initialEventImageSelection } from '../../../components/event-image-field';
 import { AppShell } from '../../../components/shell';
 import { Card, DataTablePagination, LoadingButton, StatusBadge, TableEmptyState, TableErrorState, TableSkeleton } from '../../../components/ui';
 import { apiFetch, COMMUNITY_ID } from '../../../lib/api';
+import { eventSubmissionError, type EventFormErrors, validateEventForm } from '../../../lib/event-form-errors';
 import { useI18n } from '../../../lib/i18n';
 import { formatDate } from '../../../lib/utils';
 
@@ -37,8 +39,24 @@ function AdminEventsPageContent() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
   const [form, setForm] = useState(emptyForm);
+  const [eventImage, setEventImage] = useState(() => initialEventImageSelection());
+  const [fieldErrors, setFieldErrors] = useState<EventFormErrors>({});
   const [saving, setSaving] = useState(false);
   const selectedMode: AdminEventsMode = searchParams.get('mode') === 'view' ? 'view' : 'create';
+
+  const errorLabels = {
+    createSummary: t.admin.eventCreateFailed, updateSummary: t.admin.eventUpdateFailed, reviewFields: t.admin.eventReviewFields,
+    titleRequired: t.admin.eventTitleRequired, descriptionRequired: t.admin.eventDescriptionRequired,
+    dateRequired: t.admin.eventDateRequired, dateInvalid: t.admin.eventDateInvalid, locationRequired: t.admin.eventLocationRequired,
+    capacityInvalid: t.admin.eventCapacityInvalid, imageInvalid: t.admin.eventImageServerInvalid,
+    imageUrlInvalid: t.admin.eventImageInvalidUrl, imageTooLarge: t.admin.eventImageTooLarge,
+    unauthorized: t.admin.eventUnauthorized, forbidden: t.admin.eventForbidden, conflict: t.admin.eventConflict,
+    network: t.admin.eventNetworkError, server: t.admin.eventServerError,
+  };
+
+  function clearFieldError(field: keyof EventFormErrors) {
+    setFieldErrors((current) => current[field] ? { ...current, [field]: undefined, form: field === 'form' ? undefined : current.form } : current);
+  }
 
   async function load() {
     setError('');
@@ -52,18 +70,31 @@ function AdminEventsPageContent() {
   useEffect(() => { load(); }, [t.common.error]);
 
   async function createEvent() {
-    if (!form.title.trim() || !form.description.trim() || !form.location.trim() || !form.startsAt.trim()) {
-      toast.error(t.admin.eventValidationFailed);
+    const clientErrors = validateEventForm(form, errorLabels);
+    if (Object.keys(clientErrors).length) {
+      setFieldErrors(clientErrors);
+      toast.error(t.admin.eventCreateFailed, { description: t.admin.eventReviewFields });
       return;
     }
+    const imageError = eventImageValidation(eventImage, { fileRequired: t.admin.eventImageRequired, invalidUrl: t.admin.eventImageInvalidUrl });
+    if (imageError) {
+      setFieldErrors({ image: imageError });
+      toast.error(t.admin.eventCreateFailed, { description: imageError });
+      return;
+    }
+    setFieldErrors({});
     setSaving(true);
     try {
-      await apiFetch(`/admin/${COMMUNITY_ID}/events`, { method: 'POST', body: JSON.stringify(form) });
+      await apiFetch(`/admin/${COMMUNITY_ID}/events`, { method: 'POST', body: eventRequestBody(form, eventImage) });
       setForm(emptyForm);
+      setEventImage(initialEventImageSelection());
+      setFieldErrors({});
       toast.success(t.admin.eventCreated);
       await load();
-    } catch {
-      toast.error(t.admin.eventCreateFailed);
+    } catch (error) {
+      const failure = eventSubmissionError(error, 'create', errorLabels);
+      setFieldErrors((current) => ({ ...current, [failure.field]: failure.detail }));
+      toast.error(failure.summary, { description: failure.detail });
     } finally {
       setSaving(false);
     }
@@ -108,13 +139,15 @@ function AdminEventsPageContent() {
         <Card className="rounded-2xl">
           <h2 className="text-base font-semibold text-white">{t.admin.createEvent}</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <Input label={t.admin.eventTitleLabel} value={form.title} onChange={(value) => setForm({ ...form, title: value })} />
-            <Input label={t.admin.eventDateLabel} value={form.startsAt} type="datetime-local" onChange={(value) => setForm({ ...form, startsAt: value })} />
-            <Input label={t.common.location} value={form.location} onChange={(value) => setForm({ ...form, location: value })} />
-            <Input label={t.admin.eventOnlineUrlLabel} value={form.onlineUrl} onChange={(value) => setForm({ ...form, onlineUrl: value })} />
-            <Input label={t.admin.eventCapacityLabel} value={form.capacity} onChange={(value) => setForm({ ...form, capacity: value })} />
-            <label className="xl:col-span-3"><span className="text-sm text-white/70">{t.admin.eventDescriptionLabel}</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={3} className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-accent/60" /></label>
+            <Input label={t.admin.eventTitleLabel} value={form.title} error={fieldErrors.title} onChange={(value) => { setForm({ ...form, title: value }); clearFieldError('title'); }} />
+            <Input label={t.admin.eventDateLabel} value={form.startsAt} error={fieldErrors.startsAt} type="datetime-local" onChange={(value) => { setForm({ ...form, startsAt: value }); clearFieldError('startsAt'); }} />
+            <Input label={t.common.location} value={form.location} error={fieldErrors.location} onChange={(value) => { setForm({ ...form, location: value }); clearFieldError('location'); }} />
+            <Input label={t.admin.eventOnlineUrlLabel} value={form.onlineUrl} error={fieldErrors.onlineUrl} onChange={(value) => { setForm({ ...form, onlineUrl: value }); clearFieldError('onlineUrl'); }} />
+            <Input label={t.admin.eventCapacityLabel} value={form.capacity} error={fieldErrors.capacity} onChange={(value) => { setForm({ ...form, capacity: value }); clearFieldError('capacity'); }} />
+            <label className="xl:col-span-3"><span className="text-sm text-[var(--app-muted-foreground)]">{t.admin.eventDescriptionLabel}</span><textarea value={form.description} aria-invalid={Boolean(fieldErrors.description)} onChange={(event) => { setForm({ ...form, description: event.target.value }); clearFieldError('description'); }} rows={3} className="mt-2 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 py-2.5 text-sm text-[var(--app-foreground)] outline-none focus:border-[var(--app-accent)]" />{fieldErrors.description && <p role="alert" className="app-text-danger mt-1.5 text-xs">{fieldErrors.description}</p>}</label>
+            <EventImageField className="xl:col-span-3" value={eventImage} onChange={(next) => { setEventImage(next); clearFieldError('image'); }} errorMessage={fieldErrors.image} disabled={saving} loading={saving && eventImage.mode === 'UPLOAD'} labels={{ title: t.admin.eventImageLabel, optional: t.admin.eventImageOptional, description: t.admin.eventImageDescription, noImage: t.admin.eventImageNone, emptyDescription: t.admin.eventImageEmptyDescription, upload: t.admin.eventImageUpload, useUrl: t.admin.eventImageUseUrl, url: t.admin.eventImageUrl, chooseFile: t.admin.eventImageChooseFile, replace: t.admin.eventImageReplace, remove: t.admin.eventImageRemove, preview: t.admin.eventImagePreview, apply: t.admin.eventImageApply, cancel: t.common.cancel, supportedFiles: t.admin.eventImageSupportedFiles, loadFailed: t.admin.eventImageLoadFailed, saving: t.admin.eventImageSaving, invalidType: t.admin.eventImageInvalidType, tooLarge: t.admin.eventImageTooLarge, invalidUrl: t.admin.eventImageInvalidUrl }} />
           </div>
+          {fieldErrors.form && <p role="alert" className="app-text-danger mt-3 text-sm">{fieldErrors.form}</p>}
           <LoadingButton loading={saving} loadingLabel={t.admin.updatingMember} onClick={createEvent} className="mt-4">{t.admin.createEvent}</LoadingButton>
         </Card>
         <Card className="rounded-2xl p-0">
@@ -191,4 +224,4 @@ function AdminEventsPageFallback() {
 
 function eventStatus(event: EventItem) { return new Date(event.startsAt).getTime() >= Date.now() ? 'upcoming' : 'past'; }
 function Header({ label }: { label: string }) { return <th className="px-4 py-3 font-medium"><span className="inline-flex items-center gap-2">{label}<ArrowUpDown size={13} /></span></th>; }
-function Input({ label, value, type = 'text', onChange }: { label: string; value: string; type?: string; onChange: (value: string) => void }) { return <label><span className="text-sm text-white/70">{label}</span><input type={type} value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-accent/60" /></label>; }
+function Input({ label, value, error, type = 'text', onChange }: { label: string; value: string; error?: string; type?: string; onChange: (value: string) => void }) { return <label><span className="text-sm text-[var(--app-muted-foreground)]">{label}</span><input type={type} value={value} aria-invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 py-2.5 text-sm text-[var(--app-foreground)] outline-none focus:border-[var(--app-accent)]" />{error && <p role="alert" className="app-text-danger mt-1.5 text-xs">{error}</p>}</label>; }

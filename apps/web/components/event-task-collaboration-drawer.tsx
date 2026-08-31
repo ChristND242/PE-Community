@@ -25,7 +25,7 @@ export function EventTaskCollaborationDrawer({ taskTitle, endpointBase, taskId, 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
     }
     window.addEventListener('keydown', closeOnEscape);
     return () => {

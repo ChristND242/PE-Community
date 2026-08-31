@@ -62,7 +62,7 @@ test('unverified reminder uses a viewport overlay above the application shell', 
     readFile(new URL('./components/shell.tsx', import.meta.url), 'utf8'),
     readFile(new URL('./components/profile-account-security.tsx', import.meta.url), 'utf8'),
   ]);
-  assert.match(dialog, /data-confirm-dialog-root className="fixed inset-0 z-\[80\] grid h-dvh place-items-center/);
+  assert.match(dialog, /data-confirm-dialog-root className="fixed inset-0 z-\[260\] grid h-dvh place-items-center/);
   assert.match(dialog, /data-confirm-dialog-overlay[\s\S]*fixed inset-0 z-0/);
   assert.match(dialog, /createPortal\([\s\S]*document\.body/);
   assert.match(dialog, /aria-modal="true"/);

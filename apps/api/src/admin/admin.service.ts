@@ -21,8 +21,9 @@ import { buildTaskBoardOverview } from '../task-board-overview';
 import { dateInPeriod } from '../period-analytics';
 import { parseTaskBoardAutomationRange, taskBoardAutomationComparison, taskBoardAutomationPeriod, taskBoardAutomationSparkline, type TaskBoardAutomationPeriod } from '../task-board-automation-analytics';
 import { ALL_PERMISSIONS, PERMISSION_GROUPS, ROLE_HIERARCHY, SystemRole, normalizeSystemRole } from '../rbac/permissions';
+import { eventImageMutation, type EventImageMutation } from '../event-images';
 import { publicationCoverMutation, type PublicationCoverMutation } from '../publication-covers';
-import { publicationCoverPublicUrl, publicationCoverUploadDir, type PublicationCoverUploadFile } from '../uploads';
+import { eventImagePublicUrl, eventImageUploadDir, publicationCoverPublicUrl, publicationCoverUploadDir, type EventImageUploadFile, type PublicationCoverUploadFile } from '../uploads';
 
 const eventTaskInclude = Prisma.validator<Prisma.EventTaskInclude>()({
   assignee: {
@@ -2513,31 +2514,44 @@ export class AdminService {
     return adminEventShape(event);
   }
 
-  async createEvent(communityId: string, actorUserId: string, input: Record<string, unknown>) {
+  async createEvent(communityId: string, actorUserId: string, input: Record<string, unknown>, eventImage?: EventImageUploadFile) {
     const data = eventData(input);
-    const event = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.event.create({ data: { communityId, ...data }, include: { rsvps: true } });
-      await tx.auditLog.create({
-        data: { communityId, actorUserId, action: 'event.created', targetType: 'Event', targetId: created.id, metadata: { title: created.title } },
+    const image = await prepareEventImage(eventImageMutation(input, eventImage));
+    try {
+      const event = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.event.create({ data: { communityId, ...data, ...image.data }, include: { rsvps: true } });
+        await tx.auditLog.create({
+          data: { communityId, actorUserId, action: 'event.created', targetType: 'Event', targetId: created.id, metadata: { title: created.title } },
+        });
+        return created;
       });
-      return created;
-    });
-    await this.notifyEventCreated(communityId, event.id, event.title, event.startsAt);
-    return adminEventShape(event);
+      await this.notifyEventCreated(communityId, event.id, event.title, event.startsAt);
+      return adminEventShape(event);
+    } catch (error) {
+      if (image.uploadedPath) await unlink(image.uploadedPath).catch(() => undefined);
+      throw error;
+    }
   }
 
-  async updateEvent(communityId: string, eventId: string, actorUserId: string, input: Record<string, unknown>) {
+  async updateEvent(communityId: string, eventId: string, actorUserId: string, input: Record<string, unknown>, eventImage?: EventImageUploadFile) {
     const existing = await this.prisma.event.findFirst({ where: { id: eventId, communityId } });
     if (!existing) throw new NotFoundException('Event not found.');
-    const event = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.event.update({ where: { id: existing.id }, data: eventData(input), include: { rsvps: true } });
-      await tx.taskBoard.updateMany({ where: { communityId, eventId: updated.id }, data: { name: updated.title } });
-      await tx.auditLog.create({
-        data: { communityId, actorUserId, action: 'event.updated', targetType: 'Event', targetId: updated.id, metadata: { title: updated.title } },
+    const image = await prepareEventImage(eventImageMutation(input, eventImage, true));
+    try {
+      const event = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.event.update({ where: { id: existing.id }, data: { ...eventData(input), ...image.data }, include: { rsvps: true } });
+        await tx.taskBoard.updateMany({ where: { communityId, eventId: updated.id }, data: { name: updated.title } });
+        await tx.auditLog.create({
+          data: { communityId, actorUserId, action: 'event.updated', targetType: 'Event', targetId: updated.id, metadata: { title: updated.title } },
+        });
+        return updated;
       });
-      return updated;
-    });
-    return adminEventShape(event);
+      if (image.replacesExisting) await removeUploadedEventImage(existing.imageUrl, existing.imageSource);
+      return adminEventShape(event);
+    } catch (error) {
+      if (image.uploadedPath) await unlink(image.uploadedPath).catch(() => undefined);
+      throw error;
+    }
   }
 
   async deleteEvent(communityId: string, eventId: string, actorUserId: string) {
@@ -2551,6 +2565,7 @@ export class AdminService {
       await tx.eventRsvp.deleteMany({ where: { eventId: event.id } });
       await tx.event.delete({ where: { id: event.id } });
     });
+    await removeUploadedEventImage(event.imageUrl, event.imageSource);
     return { deleted: true, id: event.id };
   }
 
@@ -4652,6 +4667,41 @@ function eventData(input: Record<string, unknown>) {
     onlineUrl: stringValue(input.onlineUrl),
     capacity: Number.isFinite(capacityValue) && capacityValue > 0 ? Math.floor(capacityValue) : null,
   };
+}
+
+type PreparedEventImage = {
+  data: { imageUrl?: string | null; imageSource?: 'UPLOAD' | 'EXTERNAL' | null };
+  uploadedPath?: string;
+  replacesExisting: boolean;
+};
+
+async function prepareEventImage(mutation: EventImageMutation): Promise<PreparedEventImage> {
+  if (mutation.action === 'keep') return { data: {}, replacesExisting: false };
+  if (mutation.action === 'clear') return { data: { imageUrl: null, imageSource: null }, replacesExisting: true };
+  if (mutation.action === 'external') {
+    return { data: { imageUrl: mutation.imageUrl, imageSource: mutation.imageSource }, replacesExisting: true };
+  }
+  const filename = `${randomUUID()}${mutation.extension}`;
+  const uploadDir = eventImageUploadDir();
+  const uploadedPath = join(uploadDir, filename);
+  await mkdir(uploadDir, { recursive: true });
+  await writeFile(uploadedPath, mutation.file.buffer);
+  return {
+    data: { imageUrl: eventImagePublicUrl(filename), imageSource: mutation.imageSource },
+    uploadedPath,
+    replacesExisting: true,
+  };
+}
+
+async function removeUploadedEventImage(imageUrl: string | null | undefined, imageSource: string | null | undefined) {
+  if (!imageUrl || imageSource !== 'UPLOAD') return;
+  try {
+    const filename = basename(new URL(imageUrl).pathname);
+    if (!/^[0-9a-f-]+\.(?:jpg|png|webp)$/i.test(filename)) return;
+    await unlink(join(eventImageUploadDir(), filename)).catch(() => undefined);
+  } catch {
+    // Malformed legacy metadata never becomes a filesystem path.
+  }
 }
 
 type PreparedPublicationCover = {

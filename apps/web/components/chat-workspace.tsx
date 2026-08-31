@@ -8,8 +8,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { useChatSocket, type ChatReactionUpdate, type ChatRealtimeMessage } from '../hooks/use-chat-socket';
 import { dispatchChatUnreadRefresh } from '../hooks/use-chat-unread-count';
-import { CHAT_KEY_BACKUP_MAX_FILE_BYTES, exportEncryptedChatKeyBackup, importEncryptedChatKeyBackup } from '../lib/chat-key-recovery';
-import { CHAT_ATTACHMENT_ENCRYPTION_ALGORITHM, CHAT_ENCRYPTION_ALGORITHM, decryptChatAttachment, decryptChatMessage, encryptChatAttachment, encryptChatMessage, importPublicKey } from '../lib/chat-crypto';
+import { CHAT_KEY_BACKUP_MAX_FILE_BYTES, exportEncryptedChatKeyBackup, importEncryptedChatKeyBackup, parseEncryptedChatKeyBackupJson } from '../lib/chat-key-recovery';
+import { CHAT_ATTACHMENT_ENCRYPTION_ALGORITHM, CHAT_ENCRYPTION_ALGORITHM, chatPublicKeysEqual, decryptChatAttachment, decryptChatMessage, encryptChatAttachment, encryptChatMessage, importPublicKey } from '../lib/chat-crypto';
 import { commitStagedLocalChatKey, getLocalChatDeviceIdentity, getLocalChatKeyRing, promoteRetainedLocalChatKey, reconcileLocalChatKeys, restoreLocalChatKeyState, snapshotLocalChatKeyState, stageGeneratedLocalChatKey, stageLocalChatKey, storeHistoricalLocalChatKey, type LocalChatDeviceIdentity, type LocalChatKeyPair } from '../lib/chat-key-store';
 import { ApiRequestError, apiFetch, apiUrl } from '../lib/api';
 import { detectClientDeviceInfo } from '../lib/chat-device-info';
@@ -720,7 +720,7 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
   const localDeviceKey = useMemo(() => (
     conversationKeys.find((key) => (
       key.userId === currentUser?.id &&
-      key.publicKey === localPublicKey &&
+      chatPublicKeysEqual(key.publicKey, localPublicKey) &&
       key.algorithm === CHAT_ENCRYPTION_ALGORITHM &&
       key.status !== 'RETIRED' &&
       key.status !== 'REVOKED'
@@ -1118,7 +1118,7 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
       setLocalPrivateKey(reconciled.current?.privateKey ?? null);
       setLocalPublicKey(reconciled.current?.publicKey ?? '');
       setLocalKeyRing(reconciled.keyRing);
-      if (reconciled.current && remote.key?.publicKey === reconciled.current.publicKey && remote.deviceAuthorized) {
+      if (reconciled.current && remote.key && chatPublicKeysEqual(remote.key.publicKey, reconciled.current.publicKey) && remote.deviceAuthorized) {
         setKeyStatus('ready');
         return;
       }
@@ -1142,7 +1142,7 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
         }
         return;
       }
-      if (reconciled.activeCandidate && remote.key?.publicKey === reconciled.activeCandidate.publicKey) {
+      if (reconciled.activeCandidate && remote.key && chatPublicKeysEqual(remote.key.publicKey, reconciled.activeCandidate.publicKey)) {
         const verification = await apiFetch<ChatRestoreVerificationResponse>('/chat/keys/restore/verify', {
           method: 'POST',
           headers: { 'x-chat-device-id': deviceIdentity.deviceIdentifier },
@@ -1621,7 +1621,7 @@ export function ChatWorkspace({ admin = false }: { admin?: boolean }) {
     let staged = false;
     let registered = false;
     try {
-      const imported = await importEncryptedChatKeyBackup(JSON.parse(await keyBackupFile.text()), keyBackupPassword);
+      const imported = await importEncryptedChatKeyBackup(parseEncryptedChatKeyBackupJson(await keyBackupFile.text()), keyBackupPassword);
       const candidate = { privateKey: imported.privateKey, publicKey: imported.publicKeyJson };
       const verification = await apiFetch<ChatRestoreVerificationResponse>('/chat/keys/restore/verify', {
         method: 'POST',
@@ -7177,7 +7177,7 @@ class ChatSendError extends Error {
 }
 
 function assertAuthorizedRegistration(response: ChatKeyRegistrationResponse, expectedPublicKey: string) {
-  if (response.key.publicKey !== expectedPublicKey || response.key.status !== 'ACTIVE' || response.device.status !== 'ACTIVE' || !response.device.current) {
+  if (!chatPublicKeysEqual(response.key.publicKey, expectedPublicKey) || response.key.status !== 'ACTIVE' || response.device.status !== 'ACTIVE' || !response.device.current) {
     throw new Error('CHAT_KEY_AUTHORIZATION_FAILED');
   }
 }
@@ -7192,6 +7192,10 @@ function chatKeyErrorLabel(error: unknown, t: ReturnType<typeof useI18n>['t'], f
   if (code === 'CHAT_RESTORE_OR_ROTATION_REQUIRED') return t.chat.chatRestoreOrRotationRequired;
   if (code === 'CHAT_KEY_ALREADY_REGISTERED') return t.chat.chatKeyAlreadyRegistered;
   if (code === 'CHAT_KEY_AUTHORIZATION_FAILED') return t.chat.chatKeyAuthorizationFailed;
+  if (code === 'INVALID_BACKUP') return t.chat.invalidBackup;
+  if (code === 'UNSUPPORTED_BACKUP_VERSION') return t.chat.unsupportedBackupVersion;
+  if (code === 'WRONG_RECOVERY_PASSWORD') return t.chat.wrongRecoveryPassword;
+  if (code === 'BACKUP_CORRUPTED') return t.chat.backupCorrupted;
   return fallback;
 }
 
@@ -7205,7 +7209,7 @@ function chatKeyErrorCode(error: unknown) {
       return '';
     }
   }
-  return error instanceof Error && /^CHAT_[A-Z0-9_]+$/.test(error.message) ? error.message : '';
+  return error instanceof Error && /^(?:CHAT_[A-Z0-9_]+|INVALID_BACKUP|UNSUPPORTED_BACKUP_VERSION|WRONG_RECOVERY_PASSWORD|BACKUP_CORRUPTED)$/.test(error.message) ? error.message : '';
 }
 
 function formatDate(value: string, locale: string) {
@@ -7379,5 +7383,5 @@ function privateKeyForMessage(
   }
   if (!keyVersionId) return null;
   const publicKey = keys.find((key) => key.id === keyVersionId)?.publicKey;
-  return localKeys.find((key) => key.publicKey === publicKey)?.privateKey ?? null;
+  return publicKey ? localKeys.find((key) => chatPublicKeysEqual(key.publicKey, publicKey))?.privateKey ?? null : null;
 }

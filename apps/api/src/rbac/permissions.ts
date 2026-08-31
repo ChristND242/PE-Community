@@ -46,6 +46,10 @@ export const PERMISSIONS = {
   chatStorageView: 'chat.storage.view',
   chatStorageManage: 'chat.storage.manage',
   chatMediaDelete: 'chat.media.delete',
+  systemUpdateView: 'systemUpdate.view',
+  systemUpdateCheck: 'systemUpdate.check',
+  systemUpdateExecute: 'systemUpdate.execute',
+  systemUpdateHistory: 'systemUpdate.history',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

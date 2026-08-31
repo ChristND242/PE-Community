@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Pona-Ekolo/PE-Community/blob/master/deploy/update-manifest.schema.json",
+  "title": "PE Community update manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "releaseContractVersion",
+    "version",
+    "releaseTag",
+    "channel",
+    "minimumVersion",
+    "minimumUpdaterVersion",
+    "images",
+    "database",
+    "supplyChain",
+    "requiresManualAction",
+    "sourceCommit"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "releaseContractVersion": { "const": 1 },
+    "version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "releaseTag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "channel": { "const": "stable" },
+    "minimumVersion": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "minimumUpdaterVersion": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "sourceCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "buildDate": { "type": "string", "format": "date-time" },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api", "web", "worker"],
+      "properties": {
+        "api": { "$ref": "#/$defs/apiImage" },
+        "web": { "$ref": "#/$defs/webImage" },
+        "worker": { "$ref": "#/$defs/workerImage" }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["migrationCompatibility"],
+      "properties": {
+        "migrationCompatibility": {
+          "enum": ["NO_MIGRATION", "BACKWARD_COMPATIBLE", "FORWARD_ONLY", "MANUAL_RECOVERY"]
+        }
+      }
+    },
+    "supplyChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestationPolicy"],
+      "properties": {
+        "attestationPolicy": {
+          "enum": ["DIGEST_ONLY", "GITHUB_PROVENANCE_REQUIRED"]
+        }
+      }
+    },
+    "requiresManualAction": { "type": "boolean" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "apiImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": { "const": "ghcr.io/pona-ekolo/pe-community-api" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "webImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": { "const": "ghcr.io/pona-ekolo/pe-community-web" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "workerImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": { "const": "ghcr.io/pona-ekolo/pe-community-worker" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}
