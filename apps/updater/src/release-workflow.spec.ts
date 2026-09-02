@@ -9,19 +9,41 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
     'utf8',
   );
   assert.match(workflow, /push:\s*\n\s*tags:/);
-  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(
+    workflow,
+    /workflow_dispatch:\s*\n\s*inputs:\s*\n\s*release_tag:\s*\n\s*description: Existing published annotated release used for production provenance verification\s*\n\s*required: true\s*\n\s*type: string/,
+  );
   assert.match(workflow, /mode=release/);
   assert.match(workflow, /mode=validation/);
+  assert.match(workflow, /Manual validation must run from main/);
+  assert.match(workflow, /build_version=validation-\$RUN_ID/);
   assert.match(workflow, /image_tag=validation-\$RUN_ID/);
+  assert.match(workflow, /source_commit=\$DISPATCH_SHA/);
   assert.match(
+    workflow,
+    /PROVENANCE_TEST_RELEASE_TAG: \$\{\{ inputs\.release_tag \}\}/,
+  );
+  assert.match(
+    workflow,
+    /Historical provenance release tag must be strict stable semver/,
+  );
+  assert.match(
+    workflow,
+    /git fetch --force --no-tags origin "\$tag_ref:\$tag_ref"/,
+  );
+  assert.match(workflow, /Historical provenance release tag must be annotated/);
+  assert.match(workflow, /provenance_test_release_tag=/);
+  assert.match(workflow, /provenance_test_source_commit=/);
+  assert.doesNotMatch(
     workflow,
     /Supply-chain validation must run from an existing annotated release tag/,
   );
   assert.match(workflow, /gh release create[^\n]+--draft/);
-  assert.match(workflow, /git cat-file -t/);
-  assert.match(workflow, /git merge-base --is-ancestor/);
-  assert.match(workflow, /git fetch --no-tags origin main/);
-  assert.match(workflow, /refs\/remotes\/origin\/main/);
+  assert.match(workflow, /\.github\/scripts\/validate-release-ref\.sh/);
+  assert.match(
+    workflow,
+    /RELEASE_REF="\$RELEASE_REF" RELEASE_REF_TYPE="\$REF_TYPE" CHECKOUT_SHA="\$DISPATCH_SHA"/,
+  );
   assert.equal(
     (workflow.match(/actions\/attest-build-provenance@[a-f0-9]{40}/g) ?? [])
       .length,
@@ -54,11 +76,19 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   assert.match(workflow, /verifyUpstreamArchiveEntries/);
   assert.match(workflow, /verifyBundleEntries/);
   assert.match(workflow, /verify-bundled-provenance\.mjs/);
+  assert.match(workflow, /verify-bundled-validation-provenance\.mjs/);
   assert.match(
     workflow,
-    /Verify generated bundled CLI against live image provenance/,
+    /Verify current validation and historical release provenance with the bundled CLI/,
   );
-  assert.match(workflow, /Verify provenance policy rejects a wrong repository/);
+  assert.match(workflow, /Historical provenance release must be published/);
+  assert.match(workflow, /Historical provenance release must be stable/);
+  assert.match(
+    workflow,
+    /Historical provenance release contract is incomplete/,
+  );
+  assert.match(workflow, /refs\/tags\/\$PROVENANCE_TEST_RELEASE_TAG/);
+  assert.match(workflow, /PROVENANCE_POLICY_REPOSITORY_MISMATCH_NOT_REJECTED/);
   assert.match(workflow, /actions\/upload-artifact@[a-f0-9]{40}/);
   assert.match(workflow, /actions\/download-artifact@[a-f0-9]{40}/);
   assert.match(workflow, /github-cli-MIT\.txt/);
@@ -75,6 +105,12 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
     /publish-release:\s*\n\s*if: github\.event_name == 'push'/,
   );
   assert.match(workflow, /if: needs\.validate\.outputs\.mode == 'validation'/);
+  assert.match(
+    workflow,
+    /if: needs\.validate\.outputs\.mode == 'release'\s*\n\s*uses: actions\/attest-build-provenance/,
+  );
+  assert.match(workflow, /type:"supply-chain-validation"/);
+  assert.match(workflow, /pe-community-validation-manifest\.json/);
   assert.doesNotMatch(workflow, /release:\s*\n\s*types:\s*\[published\]/);
   assert.doesNotMatch(workflow, /--clobber/);
   assert.doesNotMatch(workflow, /ghcr\.io\/[^\s]+:latest/);
@@ -140,6 +176,26 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
       /org\.opencontainers\.image\.created=\$\{BUILD_DATE\}/,
     );
   }
+
+  const runtimeProvenance = await readFile(
+    new URL('./provenance.ts', import.meta.url),
+    'utf8',
+  );
+  assert.match(runtimeProvenance, /`refs\/tags\/\$\{input\.releaseTag\}`/);
+  assert.doesNotMatch(runtimeProvenance, /refs\/heads\/main/);
+
+  const validationProvenance = await readFile(
+    new URL(
+      '../../../deploy/updater/verify-bundled-validation-provenance.mjs',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  assert.match(validationProvenance, /refs\/heads\/main/);
+  assert.match(
+    validationProvenance,
+    /Pona-Ekolo\/PE-Community\/\.github\/workflows\/publish-images\.yml/,
+  );
 });
 
 test('workflow-shaped manifest fixture satisfies release contract version one', () => {
