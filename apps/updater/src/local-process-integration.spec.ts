@@ -26,9 +26,17 @@ test('standalone updater enforces real Unix IPC security across restart and secr
     mkdir(runtimeDir, { recursive: true, mode: 0o750 }),
   ]);
   await Promise.all([
-    writeFile(join(deploymentRoot, 'docker-compose.prod.yml'), 'services: {}\n', { mode: 0o600 }),
-    writeFile(join(deploymentRoot, '.env'), 'PE_COMMUNITY_VERSION="v1.0.0"\n', { mode: 0o600 }),
-    writeFile(join(deploymentRoot, 'deploy/Caddyfile'), ':80 {}\n', { mode: 0o600 }),
+    writeFile(
+      join(deploymentRoot, 'docker-compose.prod.yml'),
+      'services: {}\n',
+      { mode: 0o600 },
+    ),
+    writeFile(join(deploymentRoot, '.env'), 'PE_COMMUNITY_VERSION="v1.0.0"\n', {
+      mode: 0o600,
+    }),
+    writeFile(join(deploymentRoot, 'deploy/Caddyfile'), ':80 {}\n', {
+      mode: 0o600,
+    }),
   ]);
   await chmod(runtimeDir, 0o750);
   const interruptedRunId = randomUUID();
@@ -67,7 +75,13 @@ test('standalone updater enforces real Unix IPC security across restart and secr
     await rm(root, { recursive: true, force: true });
   });
 
-  child = start({ deploymentRoot, stateDir, backupRoot, socketPath, current: secretA });
+  child = start({
+    deploymentRoot,
+    stateDir,
+    backupRoot,
+    socketPath,
+    current: secretA,
+  });
   await waitForSocket(socketPath, child);
   const socket = await stat(socketPath);
   const parent = await stat(runtimeDir);
@@ -98,38 +112,106 @@ test('standalone updater enforces real Unix IPC security across restart and secr
   assert.deepEqual(await call(socketPath, accepted), {
     status: 200,
     value: {
-      agentVersion: '1.3.0',
+      agentVersion: '1.4.0',
       protocolVersion: 2,
       topology: 'single-host',
     },
   });
-  assert.equal((await call(socketPath, accepted)).status, 401, 'nonce replay must fail');
-  assert.equal((await call(socketPath, signedRequest('x'.repeat(48), 'GET', '/v1/status'))).status, 401);
-  assert.equal((await call(socketPath, signedRequest(secretA, 'GET', '/v1/status', undefined, Date.now() - 31_000))).status, 401);
+  assert.equal(
+    (await call(socketPath, accepted)).status,
+    401,
+    'nonce replay must fail',
+  );
+  assert.equal(
+    (await call(socketPath, signedRequest('x'.repeat(48), 'GET', '/v1/status')))
+      .status,
+    401,
+  );
+  assert.equal(
+    (
+      await call(
+        socketPath,
+        signedRequest(
+          secretA,
+          'GET',
+          '/v1/status',
+          undefined,
+          Date.now() - 31_000,
+        ),
+      )
+    ).status,
+    401,
+  );
 
   const malformed = Buffer.from('{not-json');
-  const malformedRequest = signedRequest(secretA, 'POST', '/v1/install', malformed);
+  const malformedRequest = signedRequest(
+    secretA,
+    'POST',
+    '/v1/install',
+    malformed,
+  );
   assert.deepEqual(await call(socketPath, malformedRequest), {
     status: 400,
     value: { code: 'INVALID_JSON' },
   });
   assert.deepEqual(
-    await call(socketPath, signedRequest(secretA, 'POST', '/v1/install', Buffer.from('{"version":"bad","idempotencyKey":"valid-key-123456"}'))),
+    await call(
+      socketPath,
+      signedRequest(
+        secretA,
+        'POST',
+        '/v1/install',
+        Buffer.from('{"version":"bad","idempotencyKey":"valid-key-123456"}'),
+      ),
+    ),
     { status: 400, value: { code: 'INVALID_VERSION' } },
   );
 
   await stop(child);
-  child = start({ deploymentRoot, stateDir, backupRoot, socketPath, current: secretB, previous: secretA });
+  child = start({
+    deploymentRoot,
+    stateDir,
+    backupRoot,
+    socketPath,
+    current: secretB,
+    previous: secretA,
+  });
   await waitForSocket(socketPath, child);
-  assert.equal((await call(socketPath, accepted)).status, 401, 'replay cache must survive process restart');
-  assert.equal((await call(socketPath, signedRequest(secretA, 'GET', '/v1/status'))).status, 200);
-  assert.equal((await call(socketPath, signedRequest(secretB, 'GET', '/v1/status'))).status, 200);
+  assert.equal(
+    (await call(socketPath, accepted)).status,
+    401,
+    'replay cache must survive process restart',
+  );
+  assert.equal(
+    (await call(socketPath, signedRequest(secretA, 'GET', '/v1/status')))
+      .status,
+    200,
+  );
+  assert.equal(
+    (await call(socketPath, signedRequest(secretB, 'GET', '/v1/status')))
+      .status,
+    200,
+  );
 
   await stop(child);
-  child = start({ deploymentRoot, stateDir, backupRoot, socketPath, current: secretB });
+  child = start({
+    deploymentRoot,
+    stateDir,
+    backupRoot,
+    socketPath,
+    current: secretB,
+  });
   await waitForSocket(socketPath, child);
-  assert.equal((await call(socketPath, signedRequest(secretA, 'GET', '/v1/status'))).status, 401);
-  assert.equal((await call(socketPath, signedRequest(secretB, 'GET', '/v1/status'))).status, 200);
+  assert.equal(
+    (await call(socketPath, signedRequest(secretA, 'GET', '/v1/status')))
+      .status,
+    401,
+  );
+  assert.equal(
+    (await call(socketPath, signedRequest(secretB, 'GET', '/v1/status')))
+      .status,
+    200,
+  );
 });
 
 function start(input: {
@@ -177,9 +259,11 @@ async function stop(child: ChildProcess) {
 
 async function waitForSocket(socketPath: string, child: ChildProcess) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Updater exited with code ${child.exitCode}.`);
+    if (child.exitCode !== null)
+      throw new Error(`Updater exited with code ${child.exitCode}.`);
     try {
-      if ((await stat(socketPath)).isSocket() && (await probe(socketPath))) return;
+      if ((await stat(socketPath)).isSocket() && (await probe(socketPath)))
+        return;
     } catch {
       // The child may still be loading TypeScript.
     }
@@ -257,7 +341,10 @@ function call(
         response.on('end', () => {
           resolveCall({
             status: response.statusCode ?? 0,
-            value: JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>,
+            value: JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<
+              string,
+              unknown
+            >,
           });
         });
       },

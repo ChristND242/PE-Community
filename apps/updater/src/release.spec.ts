@@ -15,10 +15,12 @@ const manifest = {
   minimumVersion: 'v1.0.0',
   minimumUpdaterVersion: 'v1.1.0',
   images: Object.fromEntries(
-    Object.entries(ALLOWED_IMAGE_REPOSITORIES).map(([service, repository], index) => [
-      service,
-      { repository, digest: `sha256:${['a', 'b', 'c'][index].repeat(64)}` },
-    ]),
+    Object.entries(ALLOWED_IMAGE_REPOSITORIES).map(
+      ([service, repository], index) => [
+        service,
+        { repository, digest: `sha256:${['a', 'b', 'c'][index].repeat(64)}` },
+      ],
+    ),
   ),
   database: { migrationCompatibility: 'FORWARD_ONLY' },
   supplyChain: { attestationPolicy: 'DIGEST_ONLY' },
@@ -28,8 +30,12 @@ const manifest = {
 test('release provider accepts one bounded manifest from the fixed release source', async () => {
   const request = async (url: string | URL | Request) => {
     const value = String(url);
-    if (value.includes('/git/ref/tags/')) return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
-    if (value.includes('/git/tags/')) return jsonResponse({ object: { type: 'commit', sha: manifest.sourceCommit } });
+    if (value.includes('/git/ref/tags/'))
+      return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
+    if (value.includes('/git/tags/'))
+      return jsonResponse({
+        object: { type: 'commit', sha: manifest.sourceCommit },
+      });
     if (value.includes('/releases/tags/')) {
       return jsonResponse({
         tag_name: 'v1.2.3',
@@ -56,32 +62,59 @@ test('manifest attestation is verified before schema fields are trusted', async 
   };
   const request = async (url: string | URL | Request) => {
     const value = String(url);
-    if (value.includes('/releases/tags/')) return jsonResponse({
-      tag_name: 'v1.2.3', draft: false, prerelease: false,
-      assets: releaseAssets(),
-    });
-    if (value.includes('/git/ref/tags/')) return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
-    if (value.includes('/git/tags/')) return jsonResponse({ object: { type: 'commit', sha: manifest.sourceCommit } });
+    if (value.includes('/releases/tags/'))
+      return jsonResponse({
+        tag_name: 'v1.2.3',
+        draft: false,
+        prerelease: false,
+        assets: releaseAssets(),
+      });
+    if (value.includes('/git/ref/tags/'))
+      return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
+    if (value.includes('/git/tags/'))
+      return jsonResponse({
+        object: { type: 'commit', sha: manifest.sourceCommit },
+      });
     return new Response('{not valid json', { status: 200 });
   };
   await assert.rejects(
-    () => new GitHubReleaseProvider(request as typeof fetch, rejectingVerifier).target('v1.2.3'),
+    () =>
+      new GitHubReleaseProvider(
+        request as typeof fetch,
+        rejectingVerifier,
+      ).target('v1.2.3'),
     /MANIFEST_ATTESTATION_INVALID/,
   );
   assert.equal(verifierCalls, 1);
 });
 
 test('draft and prerelease releases are rejected before manifest verification', async () => {
-  for (const flags of [{ draft: true, prerelease: false }, { draft: false, prerelease: true }]) {
+  for (const flags of [
+    { draft: true, prerelease: false },
+    { draft: false, prerelease: true },
+  ]) {
     let verifierCalls = 0;
     const verifier: ManifestAttestationVerifier = {
       async verify() {
         verifierCalls += 1;
-        return manifestVerifier.verify({ payload: new Uint8Array(), releaseTag: 'v1.2.3', sourceCommit: manifest.sourceCommit });
+        return manifestVerifier.verify({
+          payload: new Uint8Array(),
+          releaseTag: 'v1.2.3',
+          sourceCommit: manifest.sourceCommit,
+        });
       },
     };
     await assert.rejects(
-      () => new GitHubReleaseProvider((async () => jsonResponse({ tag_name: 'v1.2.3', assets: [], ...flags })) as typeof fetch, verifier).target('v1.2.3'),
+      () =>
+        new GitHubReleaseProvider(
+          (async () =>
+            jsonResponse({
+              tag_name: 'v1.2.3',
+              assets: [],
+              ...flags,
+            })) as typeof fetch,
+          verifier,
+        ).target('v1.2.3'),
       /RELEASE_NOT_STABLE/,
     );
     assert.equal(verifierCalls, 0);
@@ -97,20 +130,29 @@ test('release provider rejects duplicate assets and non-GitHub manifest URLs', a
   };
   await assert.rejects(
     () =>
-      releaseProvider(
-        (async () => jsonResponse(release)) as typeof fetch,
-      ).target('v1.2.3'),
+      releaseProvider((async () =>
+        jsonResponse(release)) as typeof fetch).target('v1.2.3'),
     /RELEASE_MANIFEST_URL_INVALID/,
   );
   await assert.rejects(
     () =>
-      releaseProvider(
-        (async () =>
-          jsonResponse({
-            ...release,
-            assets: [...release.assets, release.assets[0]],
-          })) as typeof fetch,
-      ).target('v1.2.3'),
+      releaseProvider((async () =>
+        jsonResponse({
+          ...release,
+          assets: [...release.assets, release.assets[0]],
+        })) as typeof fetch).target('v1.2.3'),
+    /RELEASE_ASSET_INVENTORY_INVALID/,
+  );
+  await assert.rejects(
+    () =>
+      releaseProvider((async () =>
+        jsonResponse({
+          ...release,
+          assets: release.assets.filter(
+            (asset) =>
+              asset.name !== 'pe-community-updater-v1.2.3-linux-arm64.tar.gz',
+          ),
+        })) as typeof fetch).target('v1.2.3'),
     /RELEASE_ASSET_INVENTORY_INVALID/,
   );
 });
@@ -131,8 +173,7 @@ test('manifest redirects fail closed outside the allowlist', async () => {
     });
   };
   await assert.rejects(
-    () =>
-      releaseProvider(request as typeof fetch).target('v1.2.3'),
+    () => releaseProvider(request as typeof fetch).target('v1.2.3'),
     /RELEASE_MANIFEST_REDIRECT_INVALID/,
   );
 });
@@ -140,11 +181,9 @@ test('manifest redirects fail closed outside the allowlist', async () => {
 test('release discovery fails closed for transport, JSON, version, and schema failures', async () => {
   await assert.rejects(
     () =>
-      releaseProvider(
-        (async () => {
-          throw new Error('network unavailable');
-        }) as typeof fetch,
-      ).latest(),
+      releaseProvider((async () => {
+        throw new Error('network unavailable');
+      }) as typeof fetch).latest(),
     /network unavailable/,
   );
   await assert.rejects(
@@ -156,20 +195,22 @@ test('release discovery fails closed for transport, JSON, version, and schema fa
   );
   await assert.rejects(
     () =>
-      releaseProvider(
-        (async () =>
-          jsonResponse({
-            tag_name: 'latest',
-            draft: false,
-            prerelease: false,
-            assets: [],
-          })) as typeof fetch,
-      ).latest(),
+      releaseProvider((async () =>
+        jsonResponse({
+          tag_name: 'latest',
+          draft: false,
+          prerelease: false,
+          assets: [],
+        })) as typeof fetch).latest(),
     /INVALID_VERSION/,
   );
   const request = async (url: string | URL | Request) => {
-    if (String(url).includes('/git/ref/tags/')) return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
-    if (String(url).includes('/git/tags/')) return jsonResponse({ object: { type: 'commit', sha: manifest.sourceCommit } });
+    if (String(url).includes('/git/ref/tags/'))
+      return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
+    if (String(url).includes('/git/tags/'))
+      return jsonResponse({
+        object: { type: 'commit', sha: manifest.sourceCommit },
+      });
     if (String(url).startsWith('https://api.github.com/')) {
       return jsonResponse({
         tag_name: 'v1.2.3',
@@ -189,26 +230,43 @@ test('release discovery fails closed for transport, JSON, version, and schema fa
 test('release provider requires an annotated tag bound to manifest source commit', async () => {
   const request = async (url: string | URL | Request) => {
     const value = String(url);
-    if (value.includes('/releases/tags/')) return jsonResponse({
-      tag_name: 'v1.2.3', draft: false, prerelease: false,
-      assets: releaseAssets(),
-    });
-    if (value.includes('/git/ref/tags/')) return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
-    if (value.includes('/git/tags/')) return jsonResponse({ object: { type: 'commit', sha: 'f'.repeat(40) } });
+    if (value.includes('/releases/tags/'))
+      return jsonResponse({
+        tag_name: 'v1.2.3',
+        draft: false,
+        prerelease: false,
+        assets: releaseAssets(),
+      });
+    if (value.includes('/git/ref/tags/'))
+      return jsonResponse({ object: { type: 'tag', sha: 'e'.repeat(40) } });
+    if (value.includes('/git/tags/'))
+      return jsonResponse({ object: { type: 'commit', sha: 'f'.repeat(40) } });
     return jsonResponse(manifest);
   };
-  await assert.rejects(() => releaseProvider(request as typeof fetch).target('v1.2.3'), /MANIFEST_ATTESTATION_SOURCE_MISMATCH/);
+  await assert.rejects(
+    () => releaseProvider(request as typeof fetch).target('v1.2.3'),
+    /MANIFEST_ATTESTATION_SOURCE_MISMATCH/,
+  );
 
   const lightweight = async (url: string | URL | Request) => {
     const value = String(url);
-    if (value.includes('/releases/tags/')) return jsonResponse({
-      tag_name: 'v1.2.3', draft: false, prerelease: false,
-      assets: releaseAssets(),
-    });
-    if (value.includes('/git/ref/tags/')) return jsonResponse({ object: { type: 'commit', sha: manifest.sourceCommit } });
+    if (value.includes('/releases/tags/'))
+      return jsonResponse({
+        tag_name: 'v1.2.3',
+        draft: false,
+        prerelease: false,
+        assets: releaseAssets(),
+      });
+    if (value.includes('/git/ref/tags/'))
+      return jsonResponse({
+        object: { type: 'commit', sha: manifest.sourceCommit },
+      });
     return jsonResponse(manifest);
   };
-  await assert.rejects(() => releaseProvider(lightweight as typeof fetch).target('v1.2.3'), /RELEASE_TAG_NOT_ANNOTATED/);
+  await assert.rejects(
+    () => releaseProvider(lightweight as typeof fetch).target('v1.2.3'),
+    /RELEASE_TAG_NOT_ANNOTATED/,
+  );
 });
 
 test('release and manifest response bodies are bounded', async () => {
@@ -225,13 +283,22 @@ test('release and manifest response bodies are bounded', async () => {
   );
 
   const request = async (url: string | URL | Request) => {
-    if (String(url).includes('/releases/tags/')) return jsonResponse({
-      tag_name: 'v1.2.3', draft: false, prerelease: false,
-      assets: releaseAssets(),
+    if (String(url).includes('/releases/tags/'))
+      return jsonResponse({
+        tag_name: 'v1.2.3',
+        draft: false,
+        prerelease: false,
+        assets: releaseAssets(),
+      });
+    return new Response('x', {
+      status: 200,
+      headers: { 'content-length': String(128 * 1024 + 1) },
     });
-    return new Response('x', { status: 200, headers: { 'content-length': String(128 * 1024 + 1) } });
   };
-  await assert.rejects(() => releaseProvider(request as typeof fetch).target('v1.2.3'), /MANIFEST_TOO_LARGE/);
+  await assert.rejects(
+    () => releaseProvider(request as typeof fetch).target('v1.2.3'),
+    /MANIFEST_TOO_LARGE/,
+  );
 });
 
 function jsonResponse(value: unknown) {
@@ -241,11 +308,29 @@ function jsonResponse(value: unknown) {
   });
 }
 
-function releaseAssets(manifestUrl = 'https://github.com/Pona-Ekolo/PE-Community/releases/download/v1.2.3/pe-community-update-manifest.json') {
+function releaseAssets(
+  manifestUrl = 'https://github.com/Pona-Ekolo/PE-Community/releases/download/v1.2.3/pe-community-update-manifest.json',
+) {
   return [
-    { name: 'pe-community-update-manifest.json', browser_download_url: manifestUrl },
-    { name: 'pe-community-update-manifest.attestation.json', browser_download_url: 'https://github.com/Pona-Ekolo/PE-Community/releases/download/v1.2.3/pe-community-update-manifest.attestation.json' },
-    { name: 'pe-community-updater-v1.2.3.tar.gz', browser_download_url: 'https://github.com/Pona-Ekolo/PE-Community/releases/download/v1.2.3/pe-community-updater-v1.2.3.tar.gz' },
+    {
+      name: 'pe-community-update-manifest.json',
+      browser_download_url: manifestUrl,
+    },
+    {
+      name: 'pe-community-update-manifest.attestation.json',
+      browser_download_url:
+        'https://github.com/Pona-Ekolo/PE-Community/releases/download/v1.2.3/pe-community-update-manifest.attestation.json',
+    },
+    {
+      name: 'pe-community-updater-v1.2.3-linux-amd64.tar.gz',
+      browser_download_url:
+        'https://github.com/Pona-Ekolo/PE-Community/releases/download/v1.2.3/pe-community-updater-v1.2.3-linux-amd64.tar.gz',
+    },
+    {
+      name: 'pe-community-updater-v1.2.3-linux-arm64.tar.gz',
+      browser_download_url:
+        'https://github.com/Pona-Ekolo/PE-Community/releases/download/v1.2.3/pe-community-updater-v1.2.3-linux-arm64.tar.gz',
+    },
   ];
 }
 
@@ -264,6 +349,9 @@ const manifestVerifier: ManifestAttestationVerifier = {
   },
 };
 
-function releaseProvider(request: typeof fetch, verifier: ManifestAttestationVerifier = manifestVerifier) {
+function releaseProvider(
+  request: typeof fetch,
+  verifier: ManifestAttestationVerifier = manifestVerifier,
+) {
   return new GitHubReleaseProvider(request, verifier);
 }

@@ -4,46 +4,24 @@ import test from 'node:test';
 import { validateManifest } from './domain.js';
 
 test('release workflow is SHA-pinned, least-privilege, draft-first, and inventory-gated', async () => {
-  const [workflow, validator, publisher] = await Promise.all([
-    readFile(
-      new URL('../../../.github/workflows/publish-images.yml', import.meta.url),
-      'utf8',
-    ),
-    readFile(
-      new URL(
-        '../../../.github/scripts/validate-release-ref.sh',
-        import.meta.url,
-      ),
-      'utf8',
-    ),
-    readFile(
-      new URL(
-        '../../../.github/scripts/publish-release-draft.mjs',
-        import.meta.url,
-      ),
-      'utf8',
-    ),
-  ]);
+  const workflow = await readFile(
+    new URL('../../../.github/workflows/publish-images.yml', import.meta.url),
+    'utf8',
+  );
   assert.match(workflow, /push:\s*\n\s*tags:/);
-  assert.match(workflow, /node \.github\/scripts\/publish-release-draft\.mjs/);
-  assert.match(workflow, /RELEASE_REF_TYPE: \$\{\{ github\.ref_type \}\}/);
-  assert.match(workflow, /CHECKOUT_SHA: \$\{\{ github\.sha \}\}/);
-  assert.match(workflow, /bash \.github\/scripts\/validate-release-ref\.sh/);
-  assert.match(workflow, /fetch-tags: false/);
-  assert.match(validator, /RELEASE_REF_TYPE.*== "tag"/);
-  assert.match(validator, /RELEASE_REF.*== "refs\/tags\/\$RELEASE_TAG"/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /mode=release/);
+  assert.match(workflow, /mode=validation/);
+  assert.match(workflow, /image_tag=validation-\$RUN_ID/);
   assert.match(
-    validator,
-    /git fetch --force --no-tags origin "\$tag_ref:\$tag_ref"/,
+    workflow,
+    /Supply-chain validation must run from an existing annotated release tag/,
   );
-  assert.match(validator, /git cat-file -t "\$tag_ref"/);
-  assert.match(validator, /git rev-parse "\$tag_ref\^\{commit\}"/);
-  assert.match(validator, /git rev-parse "\$CHECKOUT_SHA\^\{commit\}"/);
-  assert.match(
-    validator,
-    /git merge-base --is-ancestor "\$source_commit" "\$main_ref"/,
-  );
-  assert.match(validator, /\+refs\/heads\/main:\$main_ref/);
+  assert.match(workflow, /gh release create[^\n]+--draft/);
+  assert.match(workflow, /git cat-file -t/);
+  assert.match(workflow, /git merge-base --is-ancestor/);
+  assert.match(workflow, /git fetch --no-tags origin main/);
+  assert.match(workflow, /refs\/remotes\/origin\/main/);
   assert.equal(
     (workflow.match(/actions\/attest-build-provenance@[a-f0-9]{40}/g) ?? [])
       .length,
@@ -62,20 +40,59 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   assert.match(workflow, /releaseTag:\$version/);
   assert.match(workflow, /subject-path: pe-community-update-manifest\.json/);
   assert.match(workflow, /needs: \[validate, image\]/);
-  assert.match(publisher, /releases\?per_page=100/);
-  assert.match(publisher, /releases\/\$\{releaseId\}/);
-  assert.match(publisher, /RELEASE_ASSET_DIGEST_MISMATCH/);
-  assert.match(publisher, /RELEASE_ASSET_UNEXPECTED/);
-  assert.match(publisher, /draft: false/);
-  assert.doesNotMatch(publisher, /releases\/tags/);
+  assert.match(workflow, /Release asset inventory mismatch/);
+  assert.match(workflow, /Release asset digest mismatch/);
+  assert.match(
+    workflow,
+    /pe-community-updater-\$\{VERSION\}-linux-amd64\.tar\.gz/,
+  );
+  assert.match(
+    workflow,
+    /pe-community-updater-\$\{VERSION\}-linux-arm64\.tar\.gz/,
+  );
+  assert.match(workflow, /verifyPinnedArchive/);
+  assert.match(workflow, /verifyUpstreamArchiveEntries/);
+  assert.match(workflow, /verifyBundleEntries/);
+  assert.match(workflow, /verify-bundled-provenance\.mjs/);
+  assert.match(
+    workflow,
+    /Verify generated bundled CLI against live image provenance/,
+  );
+  assert.match(workflow, /Verify provenance policy rejects a wrong repository/);
+  assert.match(workflow, /actions\/upload-artifact@[a-f0-9]{40}/);
+  assert.match(workflow, /actions\/download-artifact@[a-f0-9]{40}/);
+  assert.match(workflow, /github-cli-MIT\.txt/);
+  assert.match(
+    workflow,
+    /tar --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX'/,
+  );
+  assert.match(workflow, /GH_VERSION=2\.93\.0/);
+  assert.match(workflow, /gh_\$\{GH_VERSION\}_linux_amd64\.tar\.gz/);
+  assert.match(workflow, /gh_\$\{GH_VERSION\}_linux_arm64\.tar\.gz/);
+  assert.match(workflow, /gh release edit[^\n]+--draft=false/);
+  assert.match(
+    workflow,
+    /publish-release:\s*\n\s*if: github\.event_name == 'push'/,
+  );
+  assert.match(workflow, /if: needs\.validate\.outputs\.mode == 'validation'/);
   assert.doesNotMatch(workflow, /release:\s*\n\s*types:\s*\[published\]/);
   assert.doesNotMatch(workflow, /--clobber/);
   assert.doesNotMatch(workflow, /ghcr\.io\/[^\s]+:latest/);
+  assert.doesNotMatch(workflow, /continue-on-error:\s*true/);
+  assert.doesNotMatch(workflow, /\/usr\/bin\/gh/);
   const imageJob = workflow.slice(
     workflow.indexOf('  image:'),
-    workflow.indexOf('  publish:'),
+    workflow.indexOf('  artifacts:'),
   );
   assert.doesNotMatch(imageJob, /contents:\s*write/);
+  const sharedValidationJobs = workflow.slice(
+    workflow.indexOf('  image:'),
+    workflow.indexOf('  publish-release:'),
+  );
+  assert.doesNotMatch(
+    sharedValidationJobs,
+    /gh release (?:create|upload|edit)/,
+  );
   assert.equal((workflow.match(/contents:\s*write/g) ?? []).length, 1);
   assert.equal(
     (
@@ -101,15 +118,6 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
     ).length,
     3,
   );
-  assert.equal(
-    (
-      workflow.match(
-        /ref: \$\{\{ needs\.validate\.outputs\.source_commit \}\}/g,
-      ) ?? []
-    ).length,
-    2,
-  );
-  assert.match(publisher, /target_commitish: input\.sourceCommit/);
   for (const dockerfilePath of [
     '../../api/Dockerfile',
     '../../web/Dockerfile',

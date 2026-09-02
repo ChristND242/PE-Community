@@ -1,9 +1,14 @@
-name: Publish release images
+name: Release and supply-chain validation
 
 on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.event_name == 'push' && format('pe-community-release-{0}', github.ref) || format('pe-community-supply-chain-validation-{0}', github.ref) }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -17,19 +22,52 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       source_commit: ${{ steps.release.outputs.source_commit }}
       build_date: ${{ steps.release.outputs.build_date }}
+      mode: ${{ steps.release.outputs.mode }}
+      image_tag: ${{ steps.release.outputs.image_tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          fetch-depth: 1
-          fetch-tags: false
+          fetch-depth: 0
       - id: release
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_REF: ${{ github.ref }}
-          RELEASE_REF_TYPE: ${{ github.ref_type }}
-          CHECKOUT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          bash .github/scripts/validate-release-ref.sh
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$REF_TYPE" != "tag" ]]; then
+            echo "Supply-chain validation must run from an existing annotated release tag." >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tag must be strict stable semver (vMAJOR.MINOR.PATCH)." >&2
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "$RELEASE_TAG")" != "tag" ]]; then
+            echo "Automatic releases require an annotated tag." >&2
+            exit 1
+          fi
+          source_commit="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          if [[ ! "$source_commit" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "Release tag did not resolve to a commit." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$source_commit" refs/remotes/origin/main; then
+            echo "Release commit must belong to the protected main history." >&2
+            exit 1
+          fi
+          echo "version=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+            echo "image_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=validation" >> "$GITHUB_OUTPUT"
+            echo "image_tag=validation-$RUN_ID" >> "$GITHUB_OUTPUT"
+          fi
 
   image:
     needs: validate
@@ -45,8 +83,6 @@ jobs:
       worker_digest: ${{ steps.worker.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ needs.validate.outputs.source_commit }}
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -59,7 +95,7 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: true
-          tags: ghcr.io/pona-ekolo/pe-community-api:${{ needs.validate.outputs.version }}
+          tags: ghcr.io/pona-ekolo/pe-community-api:${{ needs.validate.outputs.image_tag }}
           build-args: |
             APP_VERSION=${{ needs.validate.outputs.version }}
             SOURCE_COMMIT=${{ needs.validate.outputs.source_commit }}
@@ -75,7 +111,7 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
-          tags: ghcr.io/pona-ekolo/pe-community-web:${{ needs.validate.outputs.version }}
+          tags: ghcr.io/pona-ekolo/pe-community-web:${{ needs.validate.outputs.image_tag }}
           build-args: |
             APP_VERSION=${{ needs.validate.outputs.version }}
             SOURCE_COMMIT=${{ needs.validate.outputs.source_commit }}
@@ -91,7 +127,7 @@ jobs:
           context: .
           file: apps/worker/Dockerfile
           push: true
-          tags: ghcr.io/pona-ekolo/pe-community-worker:${{ needs.validate.outputs.version }}
+          tags: ghcr.io/pona-ekolo/pe-community-worker:${{ needs.validate.outputs.image_tag }}
           build-args: |
             APP_VERSION=${{ needs.validate.outputs.version }}
             SOURCE_COMMIT=${{ needs.validate.outputs.source_commit }}
@@ -102,17 +138,15 @@ jobs:
           subject-digest: ${{ steps.worker.outputs.digest }}
           push-to-registry: true
 
-  publish:
+  artifacts:
     needs: [validate, image]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ needs.validate.outputs.source_commit }}
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -140,15 +174,49 @@ jobs:
             --arg apiDigest "$API_DIGEST" \
             --arg webDigest "$WEB_DIGEST" \
             --arg workerDigest "$WORKER_DIGEST" \
-            '{schemaVersion:2,releaseContractVersion:1,version:$version,releaseTag:$version,channel:"stable",minimumVersion:"v0.1.0",minimumUpdaterVersion:"v1.3.0",sourceCommit:$sourceCommit,buildDate:$buildDate,images:{api:{repository:"ghcr.io/pona-ekolo/pe-community-api",digest:$apiDigest},web:{repository:"ghcr.io/pona-ekolo/pe-community-web",digest:$webDigest},worker:{repository:"ghcr.io/pona-ekolo/pe-community-worker",digest:$workerDigest}},database:{migrationCompatibility:"FORWARD_ONLY"},supplyChain:{attestationPolicy:"GITHUB_PROVENANCE_REQUIRED"},requiresManualAction:false}' \
+            '{schemaVersion:2,releaseContractVersion:1,version:$version,releaseTag:$version,channel:"stable",minimumVersion:"v0.1.0",minimumUpdaterVersion:"v1.4.0",sourceCommit:$sourceCommit,buildDate:$buildDate,images:{api:{repository:"ghcr.io/pona-ekolo/pe-community-api",digest:$apiDigest},web:{repository:"ghcr.io/pona-ekolo/pe-community-web",digest:$webDigest},worker:{repository:"ghcr.io/pona-ekolo/pe-community-worker",digest:$workerDigest}},database:{migrationCompatibility:"FORWARD_ONLY"},supplyChain:{attestationPolicy:"GITHUB_PROVENANCE_REQUIRED"},requiresManualAction:false}' \
             > pe-community-update-manifest.json
           node --input-type=module -e "import { readFileSync } from 'node:fs'; const { validateManifest } = await import('./apps/updater/dist/domain.js'); validateManifest(JSON.parse(readFileSync('pe-community-update-manifest.json', 'utf8')))"
 
-          mkdir -p pe-community-updater/dist pe-community-updater/deploy
-          cp -R apps/updater/dist/. pe-community-updater/dist/
-          cp apps/updater/package.json pe-community-updater/package.json
-          cp deploy/updater/README.md deploy/updater/SECURITY.md deploy/updater/pe-community-updater.env.example deploy/updater/pe-community-updater.service pe-community-updater/deploy/
-          tar -czf "pe-community-updater-${VERSION}.tar.gz" pe-community-updater
+          GH_VERSION=2.93.0
+          updaters=()
+          for architecture in linux-amd64 linux-arm64; do
+            case "$architecture" in
+              linux-amd64)
+                gh_archive="gh_${GH_VERSION}_linux_amd64.tar.gz"
+                gh_sha256="02d1290eba130e0b896f3709ffff22e1c75a51475ddb70476a85abc6b5807af0"
+                ;;
+              linux-arm64)
+                gh_archive="gh_${GH_VERSION}_linux_arm64.tar.gz"
+                gh_sha256="c55feb33684abba57e9909737340d5b39282257c0363e1edde6785ac4a413be7"
+                ;;
+              *) echo "Unsupported updater architecture." >&2; exit 1 ;;
+            esac
+            curl --fail --location --proto '=https' --tlsv1.2 \
+              --output "$gh_archive" \
+              "https://github.com/cli/cli/releases/download/v${GH_VERSION}/${gh_archive}"
+            printf '%s  %s\n' "$gh_sha256" "$gh_archive" | sha256sum --check --status
+            node --input-type=module -e "import { readFileSync } from 'node:fs'; import { execFileSync } from 'node:child_process'; import { verifyPinnedArchive, verifyUpstreamArchiveEntries } from './deploy/updater/bundle-contract.mjs'; const [architecture, archive] = process.argv.slice(1); verifyPinnedArchive(readFileSync(archive), architecture); verifyUpstreamArchiveEntries(execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\\n'), architecture);" "$architecture" "$gh_archive"
+            extract_root="gh_${GH_VERSION}_${architecture//-/_}"
+            rm -rf "$extract_root" pe-community-updater
+            tar -xzf "$gh_archive" --no-same-owner --no-same-permissions
+            gh_binary="$extract_root/bin/gh"
+            test -f "$gh_binary" && test ! -L "$gh_binary"
+            [[ "$("$gh_binary" version | head -n1)" == "gh version ${GH_VERSION} "* ]] || { echo "Bundled GitHub CLI version mismatch." >&2; exit 1; }
+            mkdir -p pe-community-updater/bin pe-community-updater/dist pe-community-updater/deploy pe-community-updater/LICENSES
+            cp -R apps/updater/dist/. pe-community-updater/dist/
+            cp apps/updater/package.json pe-community-updater/package.json
+            cp "$gh_binary" pe-community-updater/bin/gh
+            chmod 0755 pe-community-updater/bin/gh
+            cp "$extract_root/LICENSE" pe-community-updater/LICENSES/github-cli-MIT.txt
+            cp deploy/updater/README.md deploy/updater/SECURITY.md deploy/updater/pe-community-updater.env.example deploy/updater/pe-community-updater.service pe-community-updater/deploy/
+            printf '%s\n' '#!/bin/sh' 'set -eu' 'root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)' 'exec /usr/bin/node "$root/dist/server.js"' > pe-community-updater/bin/pe-community-updater
+            chmod 0755 pe-community-updater/bin/pe-community-updater
+            updater="pe-community-updater-${VERSION}-${architecture}.tar.gz"
+            tar --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX' -czf "$updater" pe-community-updater
+            node --input-type=module -e "import { execFileSync } from 'node:child_process'; import { verifyBundleEntries } from './deploy/updater/bundle-contract.mjs'; const archive = process.argv[1]; verifyBundleEntries(execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\\n'));" "$updater"
+            updaters+=("$updater")
+          done
       - id: manifest-attestation
         name: Attest final update manifest
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
@@ -161,12 +229,143 @@ jobs:
           set -euo pipefail
           test -f "$BUNDLE_PATH"
           cp "$BUNDLE_PATH" pe-community-update-manifest.attestation.json
+      - name: Verify generated bundled CLI against live image provenance
+        if: needs.validate.outputs.mode == 'validation'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
+          API_DIGEST: ${{ needs.image.outputs.api_digest }}
+          WEB_DIGEST: ${{ needs.image.outputs.web_digest }}
+          WORKER_DIGEST: ${{ needs.image.outputs.worker_digest }}
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
+          archive="pe-community-updater-${VERSION}-linux-amd64.tar.gz"
+          tar -xzf "$archive" -C "$stage"
+          bundled_gh="$stage/pe-community-updater/bin/gh"
+          test -f "$bundled_gh" && test ! -L "$bundled_gh" && test -x "$bundled_gh"
+          [[ "$("$bundled_gh" version | head -n1)" == "gh version 2.93.0 "* ]] || { echo "BUNDLED_GH_VERSION_INVALID" >&2; exit 1; }
+          node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service api --repository ghcr.io/pona-ekolo/pe-community-api --digest "$API_DIGEST" --release-tag "$VERSION" --source-commit "$SOURCE_COMMIT"
+          node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service web --repository ghcr.io/pona-ekolo/pe-community-web --digest "$WEB_DIGEST" --release-tag "$VERSION" --source-commit "$SOURCE_COMMIT"
+          node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service worker --repository ghcr.io/pona-ekolo/pe-community-worker --digest "$WORKER_DIGEST" --release-tag "$VERSION" --source-commit "$SOURCE_COMMIT"
+      - name: Verify provenance policy rejects a wrong repository
+        if: needs.validate.outputs.mode == 'validation'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
+          API_DIGEST: ${{ needs.image.outputs.api_digest }}
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
+          tar -xzf "pe-community-updater-${VERSION}-linux-amd64.tar.gz" -C "$stage"
+          bundled_gh="$stage/pe-community-updater/bin/gh"
+          if node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service api --repository ghcr.io/pona-ekolo/pe-community-web --digest "$API_DIGEST" --release-tag "$VERSION" --source-commit "$SOURCE_COMMIT"; then
+            echo "PROVENANCE_POLICY_REPOSITORY_MISMATCH_NOT_REJECTED" >&2
+            exit 1
+          fi
+      - name: Upload packaged validation artifacts
+        if: needs.validate.outputs.mode == 'validation'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: supply-chain-validation-${{ github.run_id }}
+          path: |
+            pe-community-update-manifest.json
+            pe-community-update-manifest.attestation.json
+            pe-community-updater-${{ needs.validate.outputs.version }}-linux-amd64.tar.gz
+            pe-community-updater-${{ needs.validate.outputs.version }}-linux-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload packaged release artifacts
+        if: needs.validate.outputs.mode == 'release'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: supply-chain-release-${{ github.run_id }}
+          path: |
+            pe-community-update-manifest.json
+            pe-community-update-manifest.attestation.json
+            pe-community-updater-${{ needs.validate.outputs.version }}-linux-amd64.tar.gz
+            pe-community-updater-${{ needs.validate.outputs.version }}-linux-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+      - name: Write validation summary
+        if: needs.validate.outputs.mode == 'validation'
+        env:
+          API_DIGEST: ${{ needs.image.outputs.api_digest }}
+          WEB_DIGEST: ${{ needs.image.outputs.web_digest }}
+          WORKER_DIGEST: ${{ needs.image.outputs.worker_digest }}
+        run: |
+          {
+            echo '## Supply-chain validation passed'
+            echo
+            echo "Source commit: \`${{ needs.validate.outputs.source_commit }}\`"
+            echo "Validation run: \`${{ github.run_id }}\`"
+            echo
+            echo "- API digest: \`$API_DIGEST\`"
+            echo "- Web digest: \`$WEB_DIGEST\`"
+            echo "- Worker digest: \`$WORKER_DIGEST\`"
+            echo '- API/Web/Worker attestations: verified by bundled gh'
+            echo '- Updater amd64/arm64 bundles: contract passed'
+            echo '- Bundled gh version: `2.93.0`'
+            echo '- Bundled live verifier: passed'
+            echo '- Wrong repository policy check: rejected'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-release:
+    if: github.event_name == 'push'
+    needs: [validate, artifacts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: supply-chain-release-${{ github.run_id }}
+          path: release-artifacts
       - name: Create validated draft and publish atomically
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.validate.outputs.version }}
           VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
+        working-directory: release-artifacts
         run: |
           set -euo pipefail
-          node .github/scripts/publish-release-draft.mjs
+          manifest="pe-community-update-manifest.json"
+          bundle="pe-community-update-manifest.attestation.json"
+          updaters=(
+            "pe-community-updater-${VERSION}-linux-amd64.tar.gz"
+            "pe-community-updater-${VERSION}-linux-arm64.tar.gz"
+          )
+
+          if existing="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>/dev/null)"; then
+            if [[ "$(jq -r '.draft' <<<"$existing")" != "true" ]]; then
+              echo "A published release already exists for $RELEASE_TAG; immutable reruns abort." >&2
+              exit 1
+            fi
+            if [[ "$(jq '.assets | length' <<<"$existing")" != "0" ]]; then
+              echo "The existing draft contains assets; refusing to overwrite or merge a partial release." >&2
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$RELEASE_TAG" --notes "PE Community $RELEASE_TAG"
+          fi
+
+          gh release upload "$RELEASE_TAG" "$manifest" "$bundle" "${updaters[@]}" --repo "$GITHUB_REPOSITORY"
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          [[ "$(jq -r '.draft' <<<"$release")" == "true" ]] || { echo "Release became visible before validation." >&2; exit 1; }
+          mapfile -t actual_names < <(jq -r '.assets[].name' <<<"$release" | sort)
+          mapfile -t expected_names < <(printf '%s\n' "$manifest" "$bundle" "${updaters[@]}" | sort)
+          [[ "${actual_names[*]}" == "${expected_names[*]}" ]] || { echo "Release asset inventory mismatch." >&2; exit 1; }
+
+          for file in "$manifest" "$bundle" "${updaters[@]}"; do
+            expected_digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
+            expected_size="$(stat -c '%s' "$file")"
+            remote_digest="$(jq -r --arg name "$file" '.assets[] | select(.name == $name) | .digest // empty' <<<"$release")"
+            remote_size="$(jq -r --arg name "$file" '.assets[] | select(.name == $name) | .size' <<<"$release")"
+            [[ "$remote_digest" == "$expected_digest" ]] || { echo "Release asset digest mismatch for $file." >&2; exit 1; }
+            [[ "$remote_size" == "$expected_size" ]] || { echo "Release asset size mismatch for $file." >&2; exit 1; }
+          done
+
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

@@ -12,18 +12,21 @@ const stableSystem: SystemVersion = {
 
 test('an authoritative empty GitHub release catalog is successful and offers no update', async () => {
   const fixture = createFixture(stableSystem);
-  await withFetch([
-    response({}, 404),
-    response({ full_name: 'Pona-Ekolo/PE-Community', private: false }),
-  ], async () => {
-    const result = await fixture.service.check('community-1');
-    assert.equal(result.status, 'NO_RELEASE_AVAILABLE');
-    assert.equal(result.latestVersion, null);
-    assert.equal(result.releaseMetadata, null);
-    assert.equal(result.errorCategory, null);
-    assert.ok(result.lastSuccessfulCheckedAt);
-    assert.equal(fixture.audit.outcomes.at(-1), 'SUCCESS');
-  });
+  await withFetch(
+    [
+      response({}, 404),
+      response({ full_name: 'Pona-Ekolo/PE-Community', private: false }),
+    ],
+    async () => {
+      const result = await fixture.service.check('community-1');
+      assert.equal(result.status, 'NO_RELEASE_AVAILABLE');
+      assert.equal(result.latestVersion, null);
+      assert.equal(result.releaseMetadata, null);
+      assert.equal(result.errorCategory, null);
+      assert.ok(result.lastSuccessfulCheckedAt);
+      assert.equal(fixture.audit.outcomes.at(-1), 'SUCCESS');
+    },
+  );
 });
 
 test('an ambiguous latest-release 404 remains a failed check', async () => {
@@ -61,16 +64,54 @@ test('valid updater-aware releases compare against the immutable installed versi
       const result = await fixture.service.check('community-1');
       assert.equal(result.status, expectedStatus);
       assert.equal(result.latestVersion, latestVersion);
-      assert.equal((result.releaseMetadata as { sourceCommit?: string } | null)?.sourceCommit, 'b'.repeat(40));
+      assert.equal(
+        (result.releaseMetadata as { sourceCommit?: string } | null)
+          ?.sourceCommit,
+        'b'.repeat(40),
+      );
+    });
+  }
+});
+
+test('a release missing an architecture-specific updater asset remains manual-only', async () => {
+  for (const retainedAssets of [
+    ['pe-community-updater-v1.2.0-linux-amd64.tar.gz'],
+    ['pe-community-updater-v1.2.0-linux-arm64.tar.gz'],
+    ['pe-community-updater-v1.2.0.tar.gz'],
+  ]) {
+    const fixture = createFixture(stableSystem);
+    const replies = validReleaseResponses('v1.2.0');
+    const release = (await replies[0].json()) as {
+      assets: Array<{ name: string }>;
+    };
+    release.assets = release.assets.filter(
+      (asset) => !asset.name.startsWith('pe-community-updater-'),
+    );
+    release.assets.push(...retainedAssets.map((name) => ({ name })));
+    await withFetch([response(release)], async () => {
+      const result = await fixture.service.check('community-1');
+      assert.equal(result.status, 'MANUAL_REQUIRED');
+      assert.deepEqual(result.releaseMetadata, {
+        compatibilityMode: 'RELEASE_WITHOUT_UPDATER_ARTIFACT',
+        version: 'v1.2.0',
+      });
     });
   }
 });
 
 test('development builds are explicit and never query or offer remote updates', async () => {
-  const fixture = createFixture({ version: 'v0.0.0-dev', sourceCommit: null, buildDate: null, channel: 'development' });
+  const fixture = createFixture({
+    version: 'v0.0.0-dev',
+    sourceCommit: null,
+    buildDate: null,
+    channel: 'development',
+  });
   let fetchCount = 0;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => { fetchCount += 1; throw new Error('unexpected fetch'); };
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    throw new Error('unexpected fetch');
+  };
   try {
     const result = await fixture.service.check('community-1');
     assert.equal(result.status, 'DEVELOPMENT');
@@ -85,11 +126,23 @@ test('development builds are explicit and never query or offer remote updates', 
 function createFixture(systemVersion: SystemVersion) {
   const prisma = new FakePrisma();
   const audit = new FakeAudit();
-  return { prisma, audit, service: new TestReleaseDiscoveryService(prisma as never, audit as never, systemVersion) };
+  return {
+    prisma,
+    audit,
+    service: new TestReleaseDiscoveryService(
+      prisma as never,
+      audit as never,
+      systemVersion,
+    ),
+  };
 }
 
 class TestReleaseDiscoveryService extends ReleaseDiscoveryService {
-  constructor(prisma: never, audit: never, private readonly systemVersion: SystemVersion) {
+  constructor(
+    prisma: never,
+    audit: never,
+    private readonly systemVersion: SystemVersion,
+  ) {
     super(prisma, audit);
   }
 
@@ -113,16 +166,25 @@ class FakePrisma {
     this.systemUpdateCheck = {
       findFirst: async (input: { where?: { status?: { not?: string } } }) => {
         const checks = input.where?.status?.not
-          ? this.checks.filter((check) => check.status !== input.where?.status?.not)
+          ? this.checks.filter(
+              (check) => check.status !== input.where?.status?.not,
+            )
           : this.checks;
         return checks.at(-1) ?? null;
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const created = {
           id: `check-${this.checks.length + 1}`,
-          installedVersion: '', latestVersion: null, status: '', checkedAt: new Date(),
-          lastSuccessfulCheckedAt: null, releaseUrl: null, releasePublishedAt: null,
-          releaseNotes: null, errorCategory: null, releaseMetadataSnapshot: null,
+          installedVersion: '',
+          latestVersion: null,
+          status: '',
+          checkedAt: new Date(),
+          lastSuccessfulCheckedAt: null,
+          releaseUrl: null,
+          releasePublishedAt: null,
+          releaseNotes: null,
+          errorCategory: null,
+          releaseMetadataSnapshot: null,
           ...data,
         };
         this.checks.push(created);
@@ -134,7 +196,10 @@ class FakePrisma {
   }
 }
 
-async function withFetch(replies: Array<Response | Error>, operation: () => Promise<void>) {
+async function withFetch(
+  replies: Array<Response | Error>,
+  operation: () => Promise<void>,
+) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     const reply = replies.shift();
@@ -151,7 +216,10 @@ async function withFetch(replies: Array<Response | Error>, operation: () => Prom
 }
 
 function response(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 function validReleaseResponses(version: string) {
@@ -166,8 +234,12 @@ function validReleaseResponses(version: string) {
       body: 'Release notes',
       assets: [
         { name: 'pe-community-update-manifest.attestation.json' },
-        { name: `pe-community-updater-${version}.tar.gz` },
-        { name: 'pe-community-update-manifest.json', browser_download_url: manifestUrl },
+        { name: `pe-community-updater-${version}-linux-amd64.tar.gz` },
+        { name: `pe-community-updater-${version}-linux-arm64.tar.gz` },
+        {
+          name: 'pe-community-update-manifest.json',
+          browser_download_url: manifestUrl,
+        },
       ],
     }),
     response({
@@ -179,9 +251,18 @@ function validReleaseResponses(version: string) {
       minimumVersion: 'v0.1.0',
       minimumUpdaterVersion: 'v1.3.0',
       images: {
-        api: { repository: 'ghcr.io/pona-ekolo/pe-community-api', digest: `sha256:${'1'.repeat(64)}` },
-        web: { repository: 'ghcr.io/pona-ekolo/pe-community-web', digest: `sha256:${'2'.repeat(64)}` },
-        worker: { repository: 'ghcr.io/pona-ekolo/pe-community-worker', digest: `sha256:${'3'.repeat(64)}` },
+        api: {
+          repository: 'ghcr.io/pona-ekolo/pe-community-api',
+          digest: `sha256:${'1'.repeat(64)}`,
+        },
+        web: {
+          repository: 'ghcr.io/pona-ekolo/pe-community-web',
+          digest: `sha256:${'2'.repeat(64)}`,
+        },
+        worker: {
+          repository: 'ghcr.io/pona-ekolo/pe-community-worker',
+          digest: `sha256:${'3'.repeat(64)}`,
+        },
       },
       database: { migrationCompatibility: 'FORWARD_ONLY' },
       supplyChain: { attestationPolicy: 'GITHUB_PROVENANCE_REQUIRED' },

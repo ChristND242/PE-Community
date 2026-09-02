@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { request } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -88,7 +96,17 @@ test(
         await executor.run('docker', ['tag', fixtureImage, tag]);
       await executor.run(
         'docker',
-        [...compose, 'up', '-d', '--wait', 'postgres', 'redis', 'api', 'web', 'worker'],
+        [
+          ...compose,
+          'up',
+          '-d',
+          '--wait',
+          'postgres',
+          'redis',
+          'api',
+          'web',
+          'worker',
+        ],
         { cwd: deploymentRoot, timeoutMs: 120_000 },
       );
       const manifest: ReleaseManifest = {
@@ -101,9 +119,18 @@ test(
         minimumVersion: 'v1.0.0',
         minimumUpdaterVersion: 'v1.1.0',
         images: {
-          api: { repository: repositories.api, digest: `sha256:${'a'.repeat(64)}` },
-          web: { repository: repositories.web, digest: `sha256:${'b'.repeat(64)}` },
-          worker: { repository: repositories.worker, digest: `sha256:${'c'.repeat(64)}` },
+          api: {
+            repository: repositories.api,
+            digest: `sha256:${'a'.repeat(64)}`,
+          },
+          web: {
+            repository: repositories.web,
+            digest: `sha256:${'b'.repeat(64)}`,
+          },
+          worker: {
+            repository: repositories.worker,
+            digest: `sha256:${'c'.repeat(64)}`,
+          },
         },
         database: { migrationCompatibility: 'BACKWARD_COMPATIBLE' },
         supplyChain: { attestationPolicy: 'GITHUB_PROVENANCE_REQUIRED' },
@@ -160,7 +187,7 @@ test(
       await listenUpdaterSocket(server, socketPath);
       const status = await ipcCall(config, 'GET', '/v1/status');
       assert.deepEqual(status, {
-          agentVersion: '1.3.0',
+        agentVersion: '1.4.0',
         protocolVersion: 2,
         topology: 'single-host',
       });
@@ -187,11 +214,7 @@ test(
       const resumed = await ipcCall<{
         run: { status: string };
         events: Array<{ sequence: number }>;
-      }>(
-        config,
-        'GET',
-        `/v1/runs/${runId}?after=0`,
-      );
+      }>(config, 'GET', `/v1/runs/${runId}?after=0`);
       assert.equal(resumed.run.status, 'COMPLETED');
       assert.ok(resumed.events.length > 5);
       assert.deepEqual(
@@ -215,12 +238,20 @@ test(
       assert.equal((await restarted.run(runId)).run.status, 'COMPLETED');
       const backup = (await readdir(backupRoot))[0];
       assert.ok(backup);
-      assert.ok((await stat(join(backupRoot, backup, 'postgres.dump'))).size > 0);
+      assert.ok(
+        (await stat(join(backupRoot, backup, 'postgres.dump'))).size > 0,
+      );
       assert.match(
-        await readFile(join(backupRoot, backup, 'postgres.dump.sha256'), 'utf8'),
+        await readFile(
+          join(backupRoot, backup, 'postgres.dump.sha256'),
+          'utf8',
+        ),
         /^sha256:|^[a-f0-9]{64}\s+postgres\.dump/m,
       );
-      assert.match(await readFile(envFile, 'utf8'), /PE_COMMUNITY_VERSION="v1\.1\.0"/);
+      assert.match(
+        await readFile(envFile, 'utf8'),
+        /PE_COMMUNITY_VERSION="v1\.1\.0"/,
+      );
       const health = (await fetch(config.publicApiHealthUrl).then((response) =>
         response.json(),
       )) as { version: string };
@@ -260,7 +291,11 @@ class DockerFixtureExecutor extends ProcessCommandExecutor {
       });
       return Promise.resolve({ stdout: 'staged\n', stderr: '' });
     }
-    if (executable === 'docker' && args.includes('image') && args.includes('inspect')) {
+    if (
+      executable === 'docker' &&
+      args.includes('image') &&
+      args.includes('inspect')
+    ) {
       const reference = String(args[2]);
       const service = reference.includes('-api:')
         ? 'api'
@@ -278,9 +313,20 @@ class DockerFixtureExecutor extends ProcessCommandExecutor {
 }
 
 class DockerFixtureProvenanceVerifier implements ProvenanceVerifier {
-  async preflight() { return '2.98.0'; }
+  async preflight() {
+    return '2.98.0';
+  }
   async verify(input: Parameters<ProvenanceVerifier['verify']>[0]) {
-    return { service: input.service, digest: input.digest, policy: 'GITHUB_PROVENANCE_REQUIRED' as const, verifiedAt: new Date(0).toISOString(), verifierVersion: '2.98.0', repository: 'Pona-Ekolo/PE-Community' as const, workflow: '.github/workflows/publish-images.yml' as const, result: 'VERIFIED' as const };
+    return {
+      service: input.service,
+      digest: input.digest,
+      policy: 'GITHUB_PROVENANCE_REQUIRED' as const,
+      verifiedAt: new Date(0).toISOString(),
+      verifierVersion: '2.98.0',
+      repository: 'Pona-Ekolo/PE-Community' as const,
+      workflow: '.github/workflows/publish-images.yml' as const,
+      result: 'VERIFIED' as const,
+    };
   }
 }
 
@@ -291,20 +337,19 @@ async function freePort() {
     server.listen(0, '127.0.0.1', () => resolve());
   });
   const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Could not reserve a test port.');
+  if (!address || typeof address === 'string')
+    throw new Error('Could not reserve a test port.');
   await new Promise<void>((resolve, reject) =>
     server.close((error) => (error ? reject(error) : resolve())),
   );
   return address.port;
 }
 
-async function ipcCall<T extends Record<string, unknown> = Record<string, unknown>>(
-  config: UpdaterConfig,
-  method: 'GET' | 'POST',
-  path: string,
-  body?: unknown,
-) {
-  const payload = body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(body));
+async function ipcCall<
+  T extends Record<string, unknown> = Record<string, unknown>,
+>(config: UpdaterConfig, method: 'GET' | 'POST', path: string, body?: unknown) {
+  const payload =
+    body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(body));
   const timestamp = String(Date.now());
   const nonce = randomBytes(32).toString('hex');
   const contentDigest = createHash('sha256').update(payload).digest('hex');
@@ -336,9 +381,7 @@ async function ipcCall<T extends Record<string, unknown> = Record<string, unknow
         const chunks: Buffer[] = [];
         response.on('data', (chunk: Buffer) => chunks.push(chunk));
         response.on('end', () => {
-          const value = JSON.parse(
-            Buffer.concat(chunks).toString('utf8'),
-          ) as T;
+          const value = JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
           if ((response.statusCode ?? 500) >= 400)
             reject(new Error(String(value.code ?? response.statusCode)));
           else resolve(value);
@@ -356,7 +399,9 @@ async function waitForTerminal(store: AgentStore, runId: string) {
     const run = await store.loadRun(runId);
     if (
       run &&
-      ['COMPLETED', 'FAILED', 'MANUAL_INTERVENTION_REQUIRED'].includes(run.status)
+      ['COMPLETED', 'FAILED', 'MANUAL_INTERVENTION_REQUIRED'].includes(
+        run.status,
+      )
     )
       return run;
     await new Promise((resolve) => setTimeout(resolve, 1_000));

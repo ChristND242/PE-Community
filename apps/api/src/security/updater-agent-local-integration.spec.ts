@@ -22,27 +22,39 @@ test('API client negotiates with a standalone updater over its real Unix socket'
     mkdir(runtimeDir, { recursive: true, mode: 0o750 }),
   ]);
   await Promise.all([
-    writeFile(join(deploymentRoot, 'docker-compose.prod.yml'), 'services: {}\n', { mode: 0o600 }),
-    writeFile(join(deploymentRoot, '.env'), 'PE_COMMUNITY_VERSION="v1.0.0"\n', { mode: 0o600 }),
-    writeFile(join(deploymentRoot, 'deploy/Caddyfile'), ':80 {}\n', { mode: 0o600 }),
+    writeFile(
+      join(deploymentRoot, 'docker-compose.prod.yml'),
+      'services: {}\n',
+      { mode: 0o600 },
+    ),
+    writeFile(join(deploymentRoot, '.env'), 'PE_COMMUNITY_VERSION="v1.0.0"\n', {
+      mode: 0o600,
+    }),
+    writeFile(join(deploymentRoot, 'deploy/Caddyfile'), ':80 {}\n', {
+      mode: 0o600,
+    }),
   ]);
   await chmod(runtimeDir, 0o750);
 
-  const child = spawn(process.execPath, ['--import', 'tsx', 'apps/updater/src/server.ts'], {
-    cwd: resolve(import.meta.dirname, '../../../..'),
-    env: {
-      ...process.env,
-      PE_UPDATER_DEPLOYMENT_ROOT: deploymentRoot,
-      PE_UPDATER_STATE_DIR: stateDir,
-      PE_UPDATER_BACKUP_ROOT: backupRoot,
-      PE_UPDATER_SOCKET: socketPath,
-      PE_UPDATER_SHARED_SECRET: secret,
-      PE_UPDATER_MINIMUM_FREE_BYTES: String(1024 ** 3),
-      PE_UPDATER_API_HEALTH_URL: 'http://127.0.0.1:1/api/v1/health',
-      PE_UPDATER_WEB_HEALTH_URL: 'http://127.0.0.1:1/login',
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx', 'apps/updater/src/server.ts'],
+    {
+      cwd: resolve(import.meta.dirname, '../../../..'),
+      env: {
+        ...process.env,
+        PE_UPDATER_DEPLOYMENT_ROOT: deploymentRoot,
+        PE_UPDATER_STATE_DIR: stateDir,
+        PE_UPDATER_BACKUP_ROOT: backupRoot,
+        PE_UPDATER_SOCKET: socketPath,
+        PE_UPDATER_SHARED_SECRET: secret,
+        PE_UPDATER_MINIMUM_FREE_BYTES: String(1024 ** 3),
+        PE_UPDATER_API_HEALTH_URL: 'http://127.0.0.1:1/api/v1/health',
+        PE_UPDATER_WEB_HEALTH_URL: 'http://127.0.0.1:1/login',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  );
   child.stdout?.resume();
   child.stderr?.resume();
   context.after(async () => {
@@ -59,7 +71,7 @@ test('API client negotiates with a standalone updater over its real Unix socket'
     const client = new UpdaterAgentClient();
     assert.equal(client.available(), true);
     assert.deepEqual(await client.status(), {
-      agentVersion: '1.3.0',
+      agentVersion: '1.4.0',
       protocolVersion: 2,
       topology: 'single-host',
     });
@@ -83,9 +95,11 @@ async function stop(child: ChildProcess) {
 
 async function waitForSocket(socketPath: string, child: ChildProcess) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Updater exited with code ${child.exitCode}.`);
+    if (child.exitCode !== null)
+      throw new Error(`Updater exited with code ${child.exitCode}.`);
     try {
-      if ((await stat(socketPath)).isSocket() && (await probe(socketPath))) return;
+      if ((await stat(socketPath)).isSocket() && (await probe(socketPath)))
+        return;
     } catch {
       // The child may still be loading TypeScript.
     }

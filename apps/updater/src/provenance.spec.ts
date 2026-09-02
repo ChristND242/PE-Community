@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import test from 'node:test';
-import type { CommandExecutor, CommandOptions, CommandResult } from './executor.js';
+import type {
+  CommandExecutor,
+  CommandOptions,
+  CommandResult,
+} from './executor.js';
 import {
+  assertBundledVerifier,
   GitHubCliProvenanceVerifier,
   GitHubCliManifestAttestationVerifier,
   PROVENANCE_POLICY,
@@ -20,40 +25,86 @@ const input = {
   sourceCommit,
 };
 
-test('official verifier uses a fixed executable, exact digest, and immutable policy argv', async () => {
+test('official verifier uses the bundled executable, exact digest, and immutable policy argv', async () => {
   const executor = new VerifierExecutor();
-  const result = await new GitHubCliProvenanceVerifier(executor).verify(input);
+  const result = await provenanceVerifier(executor).verify(input);
   assert.equal(result.result, 'VERIFIED');
   assert.equal(result.digest, digest);
   assert.deepEqual(executor.calls[0], {
-    executable: '/usr/bin/gh',
+    executable: '/opt/pe-community-updater/bin/gh',
     args: ['version'],
     timeoutMs: 10_000,
     maxOutputBytes: 64 * 1024,
-    env: { HOME: '/var/lib/pe-community-updater', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', NO_COLOR: '1', PATH: '/usr/bin:/bin' },
+    env: {
+      HOME: '/var/lib/pe-community-updater',
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+      NO_COLOR: '1',
+      PATH: '/usr/bin:/bin',
+    },
   });
   assert.deepEqual(executor.calls[1]?.args, [
-    'attestation', 'verify', `oci://${input.repository}@${digest}`,
-    '--repo', 'Pona-Ekolo/PE-Community',
-    '--hostname', 'github.com',
-    '--signer-workflow', 'Pona-Ekolo/PE-Community/.github/workflows/publish-images.yml',
-    '--predicate-type', 'https://slsa.dev/provenance/v1',
-    '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--source-ref', 'refs/tags/v1.2.3',
-    '--source-digest', sourceCommit,
-    '--deny-self-hosted-runners', '--limit', '10', '--format', 'json',
+    'attestation',
+    'verify',
+    `oci://${input.repository}@${digest}`,
+    '--repo',
+    'Pona-Ekolo/PE-Community',
+    '--hostname',
+    'github.com',
+    '--signer-workflow',
+    'Pona-Ekolo/PE-Community/.github/workflows/publish-images.yml',
+    '--predicate-type',
+    'https://slsa.dev/provenance/v1',
+    '--cert-oidc-issuer',
+    'https://token.actions.githubusercontent.com',
+    '--source-ref',
+    'refs/tags/v1.2.3',
+    '--source-digest',
+    sourceCommit,
+    '--deny-self-hosted-runners',
+    '--limit',
+    '10',
+    '--format',
+    'json',
   ]);
   assert.equal(executor.calls[1]?.timeoutMs, PROVENANCE_POLICY.timeoutMs);
-  assert.equal(executor.calls[1]?.maxOutputBytes, PROVENANCE_POLICY.maximumOutputBytes);
-  assert.deepEqual(Object.keys(executor.calls[1]?.env ?? {}).sort(), ['HOME', 'LANG', 'LC_ALL', 'NO_COLOR', 'PATH']);
+  assert.equal(
+    executor.calls[1]?.maxOutputBytes,
+    PROVENANCE_POLICY.maximumOutputBytes,
+  );
+  assert.deepEqual(Object.keys(executor.calls[1]?.env ?? {}).sort(), [
+    'HOME',
+    'LANG',
+    'LC_ALL',
+    'NO_COLOR',
+    'PATH',
+  ]);
   assert.equal(executor.calls[1]?.env?.GH_TOKEN, undefined);
 });
 
-test('verifier fails deterministically when missing, unsupported, timed out, or output-bounded', async () => {
-  await expectCode(new GitHubCliProvenanceVerifier(new VerifierExecutor(systemError('ENOENT'))).preflight(), 'PROVENANCE_VERIFIER_MISSING');
-  await expectCode(new GitHubCliProvenanceVerifier(new VerifierExecutor(undefined, 'gh version 2.92.1\n')).preflight(), 'PROVENANCE_VERIFIER_UNSUPPORTED');
-  await expectCode(new GitHubCliProvenanceVerifier(new VerifierExecutor({ killed: true, message: 'timed out' })).preflight(), 'PROVENANCE_TIMEOUT');
-  await expectCode(new GitHubCliProvenanceVerifier(new VerifierExecutor(systemError('ERR_CHILD_PROCESS_STDIO_MAXBUFFER'))).preflight(), 'PROVENANCE_OUTPUT_INVALID');
+test('verifier fails deterministically when missing, wrong-version, timed out, or output-bounded', async () => {
+  await expectCode(
+    provenanceVerifier(new VerifierExecutor(systemError('ENOENT'))).preflight(),
+    'PROVENANCE_VERIFIER_MISSING',
+  );
+  await expectCode(
+    provenanceVerifier(
+      new VerifierExecutor(undefined, 'gh version 2.92.1\n'),
+    ).preflight(),
+    'PROVENANCE_VERIFIER_UNSUPPORTED',
+  );
+  await expectCode(
+    provenanceVerifier(
+      new VerifierExecutor({ killed: true, message: 'timed out' }),
+    ).preflight(),
+    'PROVENANCE_TIMEOUT',
+  );
+  await expectCode(
+    provenanceVerifier(
+      new VerifierExecutor(systemError('ERR_CHILD_PROCESS_STDIO_MAXBUFFER')),
+    ).preflight(),
+    'PROVENANCE_OUTPUT_INVALID',
+  );
 });
 
 test('verifier rejects missing attestations, network failures, invalid signatures, and non-zero failures', async () => {
@@ -65,7 +116,7 @@ test('verifier rejects missing attestations, network failures, invalid signature
   ] as const) {
     const executor = new VerifierExecutor();
     executor.verifyError = { message: 'command failed', stderr };
-    await expectCode(new GitHubCliProvenanceVerifier(executor).verify(input), code);
+    await expectCode(provenanceVerifier(executor).verify(input), code);
   }
 });
 
@@ -74,44 +125,88 @@ test('verifier output must cryptographically report the exact subject digest and
     '{invalid',
     '[]',
     JSON.stringify(verificationOutput(`sha256:${'b'.repeat(64)}`)),
-    JSON.stringify(verificationOutput(digest, 'https://example.invalid/predicate')),
-    JSON.stringify([{ verificationResult: { statement: verificationOutput(digest)[0].verificationResult.statement } }]),
+    JSON.stringify(
+      verificationOutput(digest, 'https://example.invalid/predicate'),
+    ),
+    JSON.stringify([
+      {
+        verificationResult: {
+          statement: verificationOutput(digest)[0].verificationResult.statement,
+        },
+      },
+    ]),
   ]) {
     const executor = new VerifierExecutor(undefined, undefined, output);
-    await expectCode(new GitHubCliProvenanceVerifier(executor).verify(input), 'PROVENANCE_OUTPUT_INVALID');
+    await expectCode(
+      provenanceVerifier(executor).verify(input),
+      'PROVENANCE_OUTPUT_INVALID',
+    );
   }
 });
 
 test('manifest values cannot inject argv or redefine repository, workflow, or executable trust', async () => {
-  const verifier = new GitHubCliProvenanceVerifier(new VerifierExecutor());
-  await expectCode(verifier.verify({ ...input, releaseTag: 'v1.2.3;id' }), 'PROVENANCE_RELEASE_TAG_MISMATCH');
-  await expectCode(verifier.verify({ ...input, digest: `${digest};id` }), 'PROVENANCE_DIGEST_MISMATCH');
-  await expectCode(verifier.verify({ ...input, repository: 'ghcr.io/attacker/image' }), 'PROVENANCE_IDENTITY_MISMATCH');
-  await expectCode(verifier.verify({ ...input, sourceCommit: `${sourceCommit};id` }), 'PROVENANCE_SOURCE_COMMIT_MISMATCH');
+  const verifier = provenanceVerifier(new VerifierExecutor());
+  await expectCode(
+    verifier.verify({ ...input, releaseTag: 'v1.2.3;id' }),
+    'PROVENANCE_RELEASE_TAG_MISMATCH',
+  );
+  await expectCode(
+    verifier.verify({ ...input, digest: `${digest};id` }),
+    'PROVENANCE_DIGEST_MISMATCH',
+  );
+  await expectCode(
+    verifier.verify({ ...input, repository: 'ghcr.io/attacker/image' }),
+    'PROVENANCE_IDENTITY_MISMATCH',
+  );
+  await expectCode(
+    verifier.verify({ ...input, sourceCommit: `${sourceCommit};id` }),
+    'PROVENANCE_SOURCE_COMMIT_MISMATCH',
+  );
 });
 
 test('manifest verifier authenticates exact bytes before parsing with immutable policy argv', async () => {
   const payload = new TextEncoder().encode('{"releaseContractVersion":1}');
-  const executor = new VerifierExecutor(undefined, undefined, JSON.stringify(manifestVerificationOutput(payload)));
-  const result = await new GitHubCliManifestAttestationVerifier(executor).verify({
+  const executor = new VerifierExecutor(
+    undefined,
+    undefined,
+    JSON.stringify(manifestVerificationOutput(payload)),
+  );
+  const result = await manifestVerifierWithInspector(executor).verify({
     payload,
     releaseTag: 'v1.2.3',
     sourceCommit,
   });
   assert.equal(result.service, 'manifest');
-  assert.equal(result.digest, `sha256:${createHash('sha256').update(payload).digest('hex')}`);
+  assert.equal(
+    result.digest,
+    `sha256:${createHash('sha256').update(payload).digest('hex')}`,
+  );
   const args = executor.calls[1]?.args ?? [];
   assert.deepEqual(args.slice(0, 2), ['attestation', 'verify']);
-  assert.match(String(args[2]), /\/pe-community-manifest-[^/]+\/pe-community-update-manifest\.json$/);
+  assert.match(
+    String(args[2]),
+    /\/pe-community-manifest-[^/]+\/pe-community-update-manifest\.json$/,
+  );
   assert.deepEqual(args.slice(3), [
-    '--repo', 'Pona-Ekolo/PE-Community',
-    '--hostname', 'github.com',
-    '--signer-workflow', 'Pona-Ekolo/PE-Community/.github/workflows/publish-images.yml',
-    '--predicate-type', 'https://slsa.dev/provenance/v1',
-    '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--source-ref', 'refs/tags/v1.2.3',
-    '--source-digest', sourceCommit,
-    '--deny-self-hosted-runners', '--limit', '10', '--format', 'json',
+    '--repo',
+    'Pona-Ekolo/PE-Community',
+    '--hostname',
+    'github.com',
+    '--signer-workflow',
+    'Pona-Ekolo/PE-Community/.github/workflows/publish-images.yml',
+    '--predicate-type',
+    'https://slsa.dev/provenance/v1',
+    '--cert-oidc-issuer',
+    'https://token.actions.githubusercontent.com',
+    '--source-ref',
+    'refs/tags/v1.2.3',
+    '--source-digest',
+    sourceCommit,
+    '--deny-self-hosted-runners',
+    '--limit',
+    '10',
+    '--format',
+    'json',
   ]);
   await assert.rejects(() => stat(String(args[2])), /ENOENT/);
 });
@@ -127,44 +222,93 @@ test('manifest verifier rejects missing, invalid, wrong-identity, wrong-workflow
   ] as const) {
     const executor = new VerifierExecutor();
     executor.verifyError = { message: 'command failed', stderr };
-    await expectCode(new GitHubCliManifestAttestationVerifier(executor).verify({
-      payload: new TextEncoder().encode('{}'), releaseTag: 'v1.2.3', sourceCommit,
-    }), code);
+    await expectCode(
+      manifestVerifierWithInspector(executor).verify({
+        payload: new TextEncoder().encode('{}'),
+        releaseTag: 'v1.2.3',
+        sourceCommit,
+      }),
+      code,
+    );
   }
   const timeout = new VerifierExecutor();
   timeout.verifyError = { killed: true, message: 'timed out' };
-  await expectCode(new GitHubCliManifestAttestationVerifier(timeout).verify({
-    payload: new TextEncoder().encode('{}'), releaseTag: 'v1.2.3', sourceCommit,
-  }), 'MANIFEST_ATTESTATION_TIMEOUT');
-  await expectCode(new GitHubCliManifestAttestationVerifier(new VerifierExecutor(systemError('ENOENT'))).verify({
-    payload: new TextEncoder().encode('{}'), releaseTag: 'v1.2.3', sourceCommit,
-  }), 'PROVENANCE_VERIFIER_MISSING');
+  await expectCode(
+    manifestVerifierWithInspector(timeout).verify({
+      payload: new TextEncoder().encode('{}'),
+      releaseTag: 'v1.2.3',
+      sourceCommit,
+    }),
+    'MANIFEST_ATTESTATION_TIMEOUT',
+  );
+  await expectCode(
+    manifestVerifierWithInspector(
+      new VerifierExecutor(systemError('ENOENT')),
+    ).verify({
+      payload: new TextEncoder().encode('{}'),
+      releaseTag: 'v1.2.3',
+      sourceCommit,
+    }),
+    'PROVENANCE_VERIFIER_MISSING',
+  );
 });
 
 test('manifest tampering and malformed verifier output fail with no digest trust', async () => {
   const signed = new TextEncoder().encode('{"version":"v1.2.3"}');
   const tampered = new TextEncoder().encode('{"version":"v9.9.9"}');
-  const executor = new VerifierExecutor(undefined, undefined, JSON.stringify(manifestVerificationOutput(signed)));
-  await expectCode(new GitHubCliManifestAttestationVerifier(executor).verify({
-    payload: tampered, releaseTag: 'v1.2.3', sourceCommit,
-  }), 'MANIFEST_DIGEST_MISMATCH');
-  await expectCode(new GitHubCliManifestAttestationVerifier(new VerifierExecutor(undefined, undefined, '{bad')).verify({
-    payload: signed, releaseTag: 'v1.2.3', sourceCommit,
-  }), 'MANIFEST_ATTESTATION_INVALID');
+  const executor = new VerifierExecutor(
+    undefined,
+    undefined,
+    JSON.stringify(manifestVerificationOutput(signed)),
+  );
+  await expectCode(
+    manifestVerifierWithInspector(executor).verify({
+      payload: tampered,
+      releaseTag: 'v1.2.3',
+      sourceCommit,
+    }),
+    'MANIFEST_DIGEST_MISMATCH',
+  );
+  await expectCode(
+    manifestVerifierWithInspector(
+      new VerifierExecutor(undefined, undefined, '{bad'),
+    ).verify({
+      payload: signed,
+      releaseTag: 'v1.2.3',
+      sourceCommit,
+    }),
+    'MANIFEST_ATTESTATION_INVALID',
+  );
 });
 
 class VerifierExecutor implements CommandExecutor {
-  calls: Array<{ executable: string; args: readonly string[]; timeoutMs?: number; maxOutputBytes?: number; env?: NodeJS.ProcessEnv }> = [];
+  calls: Array<{
+    executable: string;
+    args: readonly string[];
+    timeoutMs?: number;
+    maxOutputBytes?: number;
+    env?: NodeJS.ProcessEnv;
+  }> = [];
   verifyError: unknown;
 
   constructor(
     private readonly versionError?: unknown,
-    private readonly versionOutput = 'gh version 2.98.0 (2026-08-27)\n',
+    private readonly versionOutput = 'gh version 2.93.0 (2026-05-27)\n',
     private readonly verifyOutput = JSON.stringify(verificationOutput(digest)),
   ) {}
 
-  async run(executable: string, args: readonly string[], options: CommandOptions = {}): Promise<CommandResult> {
-    this.calls.push({ executable, args, timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes, env: options.env });
+  async run(
+    executable: string,
+    args: readonly string[],
+    options: CommandOptions = {},
+  ): Promise<CommandResult> {
+    this.calls.push({
+      executable,
+      args,
+      timeoutMs: options.timeoutMs,
+      maxOutputBytes: options.maxOutputBytes,
+      env: options.env,
+    });
     if (args[0] === 'version') {
       if (this.versionError) throw this.versionError;
       return { stdout: this.versionOutput, stderr: '' };
@@ -173,36 +317,113 @@ class VerifierExecutor implements CommandExecutor {
     return { stdout: this.verifyOutput, stderr: '' };
   }
 
-  async capture() { return { stderr: '' }; }
+  async capture() {
+    return { stderr: '' };
+  }
 }
 
-function verificationOutput(subjectDigest: string, predicateType: string = PROVENANCE_POLICY.predicateType) {
-  return [{
-    verificationResult: {
-      statement: {
-        predicateType,
-        subject: [{ name: input.repository, digest: { sha256: subjectDigest.slice('sha256:'.length) } }],
+function provenanceVerifier(executor: CommandExecutor) {
+  return new GitHubCliProvenanceVerifier(executor, () => {});
+}
+
+function manifestVerifierWithInspector(executor: CommandExecutor) {
+  return new GitHubCliManifestAttestationVerifier(executor, () => {});
+}
+
+test('bundled verifier inspection rejects a missing, symlinked, writable, or non-root verifier', () => {
+  const valid = {
+    isFile: () => true,
+    isSymbolicLink: () => false,
+    mode: 0o100755,
+    uid: 0,
+  };
+  assert.doesNotThrow(() =>
+    assertBundledVerifier('/opt/pe-community-updater/bin/gh', {
+      lstat: () => valid,
+      realpath: (path) => path,
+    }),
+  );
+  assert.throws(
+    () =>
+      assertBundledVerifier('/opt/pe-community-updater/bin/gh', {
+        lstat: () => {
+          throw systemError('ENOENT');
+        },
+        realpath: (path) => path,
+      }),
+    (error: unknown) =>
+      error instanceof ProvenanceError &&
+      error.code === 'PROVENANCE_VERIFIER_MISSING',
+  );
+  for (const stat of [
+    { ...valid, isSymbolicLink: () => true },
+    { ...valid, mode: 0o100775 },
+    { ...valid, uid: 1000 },
+  ]) {
+    assert.throws(
+      () =>
+        assertBundledVerifier('/opt/pe-community-updater/bin/gh', {
+          lstat: () => stat,
+          realpath: (path) => path,
+        }),
+      (error: unknown) =>
+        error instanceof ProvenanceError &&
+        error.code === 'PROVENANCE_VERIFIER_UNSAFE',
+    );
+  }
+});
+
+function verificationOutput(
+  subjectDigest: string,
+  predicateType: string = PROVENANCE_POLICY.predicateType,
+) {
+  return [
+    {
+      verificationResult: {
+        statement: {
+          predicateType,
+          subject: [
+            {
+              name: input.repository,
+              digest: { sha256: subjectDigest.slice('sha256:'.length) },
+            },
+          ],
+        },
+        signature: {
+          certificate: { sourceRepository: PROVENANCE_POLICY.repository },
+        },
+        verifiedTimestamps: [
+          { type: 'TLOG', timestamp: '2026-08-31T00:00:00Z' },
+        ],
       },
-      signature: { certificate: { sourceRepository: PROVENANCE_POLICY.repository } },
-      verifiedTimestamps: [{ type: 'TLOG', timestamp: '2026-08-31T00:00:00Z' }],
     },
-  }];
+  ];
 }
 
 function manifestVerificationOutput(payload: Uint8Array) {
-  return [{
-    verificationResult: {
-      statement: {
-        predicateType: PROVENANCE_POLICY.predicateType,
-        subject: [{
-          name: 'pe-community-update-manifest.json',
-          digest: { sha256: createHash('sha256').update(payload).digest('hex') },
-        }],
+  return [
+    {
+      verificationResult: {
+        statement: {
+          predicateType: PROVENANCE_POLICY.predicateType,
+          subject: [
+            {
+              name: 'pe-community-update-manifest.json',
+              digest: {
+                sha256: createHash('sha256').update(payload).digest('hex'),
+              },
+            },
+          ],
+        },
+        signature: {
+          certificate: { sourceRepository: PROVENANCE_POLICY.repository },
+        },
+        verifiedTimestamps: [
+          { type: 'TLOG', timestamp: '2026-08-31T00:00:00Z' },
+        ],
       },
-      signature: { certificate: { sourceRepository: PROVENANCE_POLICY.repository } },
-      verifiedTimestamps: [{ type: 'TLOG', timestamp: '2026-08-31T00:00:00Z' }],
     },
-  }];
+  ];
 }
 
 function systemError(code: string) {
@@ -210,5 +431,8 @@ function systemError(code: string) {
 }
 
 async function expectCode(promise: Promise<unknown>, code: string) {
-  await assert.rejects(promise, (error: unknown) => error instanceof ProvenanceError && error.code === code);
+  await assert.rejects(
+    promise,
+    (error: unknown) => error instanceof ProvenanceError && error.code === code,
+  );
 }
