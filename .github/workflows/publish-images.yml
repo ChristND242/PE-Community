@@ -202,6 +202,39 @@ jobs:
           fi
 
           GH_VERSION=2.93.0
+          verify_bundled_gh() {
+            local architecture="$1"
+            local gh_binary="$2"
+            local expected_machine actual_machine version_line
+
+            if [[ ! -f "$gh_binary" || -L "$gh_binary" ]]; then
+              echo "BUNDLED_GH_MISSING" >&2
+              return 1
+            fi
+            if [[ ! -x "$gh_binary" ]]; then
+              echo "BUNDLED_GH_NOT_EXECUTABLE" >&2
+              return 1
+            fi
+
+            case "$architecture" in
+              linux-amd64) expected_machine="Advanced Micro Devices X86-64" ;;
+              linux-arm64) expected_machine="AArch64" ;;
+              *) echo "BUNDLED_GH_ARCHITECTURE_UNSUPPORTED" >&2; return 1 ;;
+            esac
+            if ! actual_machine="$(LC_ALL=C readelf -h "$gh_binary" 2>/dev/null | awk -F: '/^[[:space:]]*Machine:/{gsub(/^[[:space:]]+/, "", $2); print $2; exit}')"; then
+              echo "BUNDLED_GH_ARCHITECTURE_MISMATCH" >&2
+              return 1
+            fi
+            [[ "$actual_machine" == "$expected_machine" ]] || { echo "BUNDLED_GH_ARCHITECTURE_MISMATCH" >&2; return 1; }
+
+            if [[ "$architecture" == "linux-amd64" ]]; then
+              if ! version_line="$("$gh_binary" version | head -n1)"; then
+                echo "BUNDLED_GH_VERSION_MISMATCH" >&2
+                return 1
+              fi
+              [[ "$version_line" == "gh version ${GH_VERSION} "* ]] || { echo "BUNDLED_GH_VERSION_MISMATCH" >&2; return 1; }
+            fi
+          }
           updaters=()
           for architecture in linux-amd64 linux-arm64; do
             case "$architecture" in
@@ -224,8 +257,7 @@ jobs:
             rm -rf "$extract_root" pe-community-updater
             tar -xzf "$gh_archive" --no-same-owner --no-same-permissions
             gh_binary="$extract_root/bin/gh"
-            test -f "$gh_binary" && test ! -L "$gh_binary"
-            [[ "$("$gh_binary" version | head -n1)" == "gh version ${GH_VERSION} "* ]] || { echo "Bundled GitHub CLI version mismatch." >&2; exit 1; }
+            verify_bundled_gh "$architecture" "$gh_binary"
             mkdir -p pe-community-updater/bin pe-community-updater/dist pe-community-updater/deploy pe-community-updater/LICENSES
             cp -R apps/updater/dist/. pe-community-updater/dist/
             cp apps/updater/package.json pe-community-updater/package.json

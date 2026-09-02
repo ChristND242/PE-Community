@@ -99,6 +99,32 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   assert.match(workflow, /GH_VERSION=2\.93\.0/);
   assert.match(workflow, /gh_\$\{GH_VERSION\}_linux_amd64\.tar\.gz/);
   assert.match(workflow, /gh_\$\{GH_VERSION\}_linux_arm64\.tar\.gz/);
+  const packagingStep = workflow.slice(
+    workflow.indexOf('      - name: Build final release artifacts'),
+    workflow.indexOf('      - id: manifest-attestation'),
+  );
+  assert.match(packagingStep, /verify_bundled_gh\(\)/);
+  assert.match(
+    packagingStep,
+    /linux-amd64\) expected_machine="Advanced Micro Devices X86-64"/,
+  );
+  assert.match(packagingStep, /linux-arm64\) expected_machine="AArch64"/);
+  assert.match(packagingStep, /readelf -h "\$gh_binary"/);
+  assert.match(packagingStep, /BUNDLED_GH_MISSING/);
+  assert.match(packagingStep, /BUNDLED_GH_ARCHITECTURE_MISMATCH/);
+  assert.match(packagingStep, /BUNDLED_GH_VERSION_MISMATCH/);
+  assert.match(
+    packagingStep,
+    /if \[\[ "\$architecture" == "linux-amd64" \]\]; then\s*if ! version_line="\$\("\$gh_binary" version \| head -n1\)"/,
+  );
+  assert.doesNotMatch(
+    packagingStep,
+    /^\s*\[\[ "\$\("\$gh_binary" version \| head -n1\)" ==/m,
+  );
+  assert.match(
+    packagingStep,
+    /verify_bundled_gh "\$architecture" "\$gh_binary"/,
+  );
   assert.match(workflow, /gh release edit[^\n]+--draft=false/);
   assert.match(
     workflow,
