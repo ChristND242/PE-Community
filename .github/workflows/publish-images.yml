@@ -65,8 +65,8 @@ jobs:
             [[ "$(git cat-file -t "$tag_ref")" == "tag" ]] || { echo "Historical provenance release tag must be annotated." >&2; exit 1; }
             provenance_test_source_commit="$(git rev-parse "$tag_ref^{commit}")"
             [[ "$provenance_test_source_commit" =~ ^[a-f0-9]{40}$ ]] || { echo "Historical provenance release tag did not resolve to a commit." >&2; exit 1; }
-            echo "build_version=validation-$RUN_ID" >> "$GITHUB_OUTPUT"
-            echo "version=validation-$RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "build_version=v0.0.0-validation.$RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "version=v0.0.0-validation.$RUN_ID" >> "$GITHUB_OUTPUT"
             echo "source_commit=$DISPATCH_SHA" >> "$GITHUB_OUTPUT"
             echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
             echo "mode=validation" >> "$GITHUB_OUTPUT"

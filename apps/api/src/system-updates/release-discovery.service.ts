@@ -79,7 +79,7 @@ export class ReleaseDiscoveryService implements OnModuleInit, OnModuleDestroy {
       orderBy: { checkedAt: 'desc' },
       select: { checkedAt: true },
     });
-    if (systemVersion.channel === 'development') {
+    if (systemVersion.channel !== 'stable') {
       return this.recordNoRelease(
         communityId,
         installed,

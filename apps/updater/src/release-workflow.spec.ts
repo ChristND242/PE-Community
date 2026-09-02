@@ -16,7 +16,7 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   assert.match(workflow, /mode=release/);
   assert.match(workflow, /mode=validation/);
   assert.match(workflow, /Manual validation must run from main/);
-  assert.match(workflow, /build_version=validation-\$RUN_ID/);
+  assert.match(workflow, /build_version=v0\.0\.0-validation\.\$RUN_ID/);
   assert.match(workflow, /image_tag=validation-\$RUN_ID/);
   assert.match(workflow, /source_commit=\$DISPATCH_SHA/);
   assert.match(

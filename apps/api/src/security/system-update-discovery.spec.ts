@@ -123,6 +123,30 @@ test('development builds are explicit and never query or offer remote updates', 
   }
 });
 
+test('validation builds are non-installable and never query remote releases', async () => {
+  const fixture = createFixture({
+    version: 'v0.0.0-validation.33673603612',
+    sourceCommit: 'a'.repeat(40),
+    buildDate: '2026-09-02T19:29:32.000Z',
+    channel: 'validation',
+  });
+  let fetchCount = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    throw new Error('unexpected fetch');
+  };
+  try {
+    const result = await fixture.service.check('community-1');
+    assert.equal(result.status, 'DEVELOPMENT');
+    assert.equal(result.installedVersion, 'v0.0.0-validation.33673603612');
+    assert.equal(result.latestVersion, null);
+    assert.equal(fetchCount, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function createFixture(systemVersion: SystemVersion) {
   const prisma = new FakePrisma();
   const audit = new FakeAudit();
