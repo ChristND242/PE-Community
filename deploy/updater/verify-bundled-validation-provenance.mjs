@@ -34,7 +34,7 @@ try {
       '--format',
       'json',
     ],
-    { env: process.env, stdio: 'inherit' },
+    { env: process.env, stdio: ['ignore', 'ignore', 'inherit'] },
   );
 } catch {
   process.exitCode = 1;

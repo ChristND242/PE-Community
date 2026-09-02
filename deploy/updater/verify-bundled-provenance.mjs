@@ -15,7 +15,7 @@ try {
     }),
     {
       env: process.env,
-      stdio: 'inherit',
+      stdio: ['ignore', 'ignore', 'inherit'],
     },
   );
 } catch {

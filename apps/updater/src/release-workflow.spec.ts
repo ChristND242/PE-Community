@@ -83,12 +83,33 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   );
   assert.match(workflow, /Historical provenance release must be published/);
   assert.match(workflow, /Historical provenance release must be stable/);
-  assert.match(
-    workflow,
-    /Historical provenance release contract is incomplete/,
-  );
+  assert.match(workflow, /HISTORICAL_RELEASE_MANIFEST_MISSING/);
+  assert.match(workflow, /HISTORICAL_RELEASE_MANIFEST_ATTESTATION_MISSING/);
+  assert.match(workflow, /HISTORICAL_RELEASE_CONTRACT_UNSUPPORTED/);
+  assert.match(workflow, /HISTORICAL_RELEASE_API_DIGEST_MISSING/);
+  assert.match(workflow, /HISTORICAL_RELEASE_WEB_DIGEST_MISSING/);
+  assert.match(workflow, /HISTORICAL_RELEASE_WORKER_DIGEST_MISSING/);
   assert.match(workflow, /refs\/tags\/\$PROVENANCE_TEST_RELEASE_TAG/);
   assert.match(workflow, /PROVENANCE_POLICY_REPOSITORY_MISMATCH_NOT_REJECTED/);
+  const historicalProof = workflow.slice(
+    workflow.indexOf('          release='),
+    workflow.indexOf('      - name: Upload packaged validation artifacts'),
+  );
+  assert.match(historicalProof, /historical_asset_count\(\)/);
+  assert.doesNotMatch(historicalProof, /expected_historical_assets/);
+  assert.doesNotMatch(
+    historicalProof,
+    /pe-community-updater-\$\{PROVENANCE_TEST_RELEASE_TAG\}-linux-/,
+  );
+  assert.match(
+    historicalProof,
+    /attestation verify "\$historical_manifest"[\s\S]*> "\$stage\/historical-manifest-verification\.txt"/,
+  );
+  assert.match(
+    historicalProof,
+    /Historical \$\{PROVENANCE_TEST_RELEASE_TAG\} manifest provenance: verified/,
+  );
+  assert.match(workflow, /Current validation API provenance: verified/);
   assert.match(workflow, /actions\/upload-artifact@[a-f0-9]{40}/);
   assert.match(workflow, /actions\/download-artifact@[a-f0-9]{40}/);
   assert.match(workflow, /github-cli-MIT\.txt/);
@@ -222,6 +243,17 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
     validationProvenance,
     /Pona-Ekolo\/PE-Community\/\.github\/workflows\/publish-images\.yml/,
   );
+  for (const verifierPath of [
+    '../../../deploy/updater/verify-bundled-provenance.mjs',
+    '../../../deploy/updater/verify-bundled-validation-provenance.mjs',
+  ]) {
+    const verifier = await readFile(
+      new URL(verifierPath, import.meta.url),
+      'utf8',
+    );
+    assert.match(verifier, /stdio: \['ignore', 'ignore', 'inherit'\]/);
+    assert.doesNotMatch(verifier, /stdio: 'inherit'/);
+  }
 });
 
 test('workflow-shaped manifest fixture satisfies release contract version one', () => {

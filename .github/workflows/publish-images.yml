@@ -307,24 +307,33 @@ jobs:
           test -f "$bundled_gh" && test ! -L "$bundled_gh" && test -x "$bundled_gh"
           [[ "$("$bundled_gh" version | head -n1)" == "gh version 2.93.0 "* ]] || { echo "BUNDLED_GH_VERSION_INVALID" >&2; exit 1; }
           node deploy/updater/verify-bundled-validation-provenance.mjs --gh "$bundled_gh" --service api --digest "$API_DIGEST" --source-commit "$SOURCE_COMMIT"
+          echo 'Current validation API provenance: verified'
           node deploy/updater/verify-bundled-validation-provenance.mjs --gh "$bundled_gh" --service web --digest "$WEB_DIGEST" --source-commit "$SOURCE_COMMIT"
+          echo 'Current validation Web provenance: verified'
           node deploy/updater/verify-bundled-validation-provenance.mjs --gh "$bundled_gh" --service worker --digest "$WORKER_DIGEST" --source-commit "$SOURCE_COMMIT"
+          echo 'Current validation Worker provenance: verified'
 
           release="$($bundled_gh api "repos/$GITHUB_REPOSITORY/releases/tags/$PROVENANCE_TEST_RELEASE_TAG")"
           [[ "$(jq -r '.draft' <<<"$release")" == "false" ]] || { echo "Historical provenance release must be published." >&2; exit 1; }
           [[ "$(jq -r '.prerelease' <<<"$release")" == "false" ]] || { echo "Historical provenance release must be stable." >&2; exit 1; }
           [[ "$(jq -r '.tag_name' <<<"$release")" == "$PROVENANCE_TEST_RELEASE_TAG" ]] || { echo "Historical provenance release tag mismatch." >&2; exit 1; }
-          mapfile -t historical_assets < <(jq -r '.assets[].name' <<<"$release" | sort)
-          mapfile -t expected_historical_assets < <(printf '%s\n' "pe-community-update-manifest.json" "pe-community-update-manifest.attestation.json" "pe-community-updater-${PROVENANCE_TEST_RELEASE_TAG}-linux-amd64.tar.gz" "pe-community-updater-${PROVENANCE_TEST_RELEASE_TAG}-linux-arm64.tar.gz" | sort)
-          [[ "${historical_assets[*]}" == "${expected_historical_assets[*]}" ]] || { echo "Historical provenance release contract is incomplete." >&2; exit 1; }
+          historical_asset_count() {
+            jq --arg name "$1" '[.assets[]? | select(.name == $name)] | length' <<<"$release"
+          }
+          [[ "$(historical_asset_count pe-community-update-manifest.json)" == "1" ]] || { echo "HISTORICAL_RELEASE_MANIFEST_MISSING" >&2; exit 1; }
+          [[ "$(historical_asset_count pe-community-update-manifest.attestation.json)" == "1" ]] || { echo "HISTORICAL_RELEASE_MANIFEST_ATTESTATION_MISSING" >&2; exit 1; }
           historical_manifest="$stage/pe-community-update-manifest.json"
           "$bundled_gh" release download "$PROVENANCE_TEST_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern pe-community-update-manifest.json --output "$historical_manifest"
-          "$bundled_gh" attestation verify "$historical_manifest" --repo Pona-Ekolo/PE-Community --hostname github.com --signer-workflow Pona-Ekolo/PE-Community/.github/workflows/publish-images.yml --predicate-type https://slsa.dev/provenance/v1 --cert-oidc-issuer https://token.actions.githubusercontent.com --source-ref "refs/tags/$PROVENANCE_TEST_RELEASE_TAG" --source-digest "$PROVENANCE_TEST_SOURCE_COMMIT" --deny-self-hosted-runners --limit 10 --format json
-          node --input-type=module -e "import { readFileSync } from 'node:fs'; const { validateManifest } = await import('./apps/updater/dist/domain.js'); const [file, tag, commit] = process.argv.slice(1); const manifest = validateManifest(JSON.parse(readFileSync(file, 'utf8'))); if (manifest.releaseTag !== tag || manifest.sourceCommit !== commit || manifest.supplyChain.attestationPolicy !== 'GITHUB_PROVENANCE_REQUIRED') throw new Error('HISTORICAL_PROVENANCE_MANIFEST_INVALID'); for (const service of ['api', 'web', 'worker']) console.log('HISTORICAL_' + service.toUpperCase() + '_DIGEST=' + manifest.images[service].digest);" "$historical_manifest" "$PROVENANCE_TEST_RELEASE_TAG" "$PROVENANCE_TEST_SOURCE_COMMIT" > "$stage/historical-images.env"
+          "$bundled_gh" attestation verify "$historical_manifest" --repo Pona-Ekolo/PE-Community --hostname github.com --signer-workflow Pona-Ekolo/PE-Community/.github/workflows/publish-images.yml --predicate-type https://slsa.dev/provenance/v1 --cert-oidc-issuer https://token.actions.githubusercontent.com --source-ref "refs/tags/$PROVENANCE_TEST_RELEASE_TAG" --source-digest "$PROVENANCE_TEST_SOURCE_COMMIT" --deny-self-hosted-runners --limit 10 > "$stage/historical-manifest-verification.txt"
+          echo "Historical ${PROVENANCE_TEST_RELEASE_TAG} manifest provenance: verified"
+          node --input-type=module -e "import { readFileSync } from 'node:fs'; const { validateManifest } = await import('./apps/updater/dist/domain.js'); const [file, tag, commit] = process.argv.slice(1); const raw = JSON.parse(readFileSync(file, 'utf8')); const digestErrors = Object.freeze({ api: 'HISTORICAL_RELEASE_API_DIGEST_MISSING', web: 'HISTORICAL_RELEASE_WEB_DIGEST_MISSING', worker: 'HISTORICAL_RELEASE_WORKER_DIGEST_MISSING' }); if (!raw || typeof raw !== 'object' || raw.releaseContractVersion !== 1) throw new Error('HISTORICAL_RELEASE_CONTRACT_UNSUPPORTED'); for (const [service, errorCode] of Object.entries(digestErrors)) { const image = raw.images?.[service]; if (!image || typeof image.digest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(image.digest)) throw new Error(errorCode); } const manifest = validateManifest(raw); if (manifest.releaseTag !== tag || manifest.sourceCommit !== commit || manifest.supplyChain.attestationPolicy !== 'GITHUB_PROVENANCE_REQUIRED') throw new Error('HISTORICAL_RELEASE_MANIFEST_INVALID'); for (const service of Object.keys(digestErrors)) console.log('HISTORICAL_' + service.toUpperCase() + '_DIGEST=' + manifest.images[service].digest);" "$historical_manifest" "$PROVENANCE_TEST_RELEASE_TAG" "$PROVENANCE_TEST_SOURCE_COMMIT" > "$stage/historical-images.env"
           source "$stage/historical-images.env"
           node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service api --repository ghcr.io/pona-ekolo/pe-community-api --digest "$HISTORICAL_API_DIGEST" --release-tag "$PROVENANCE_TEST_RELEASE_TAG" --source-commit "$PROVENANCE_TEST_SOURCE_COMMIT"
+          echo "Historical ${PROVENANCE_TEST_RELEASE_TAG} API provenance: verified"
           node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service web --repository ghcr.io/pona-ekolo/pe-community-web --digest "$HISTORICAL_WEB_DIGEST" --release-tag "$PROVENANCE_TEST_RELEASE_TAG" --source-commit "$PROVENANCE_TEST_SOURCE_COMMIT"
+          echo "Historical ${PROVENANCE_TEST_RELEASE_TAG} Web provenance: verified"
           node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service worker --repository ghcr.io/pona-ekolo/pe-community-worker --digest "$HISTORICAL_WORKER_DIGEST" --release-tag "$PROVENANCE_TEST_RELEASE_TAG" --source-commit "$PROVENANCE_TEST_SOURCE_COMMIT"
+          echo "Historical ${PROVENANCE_TEST_RELEASE_TAG} Worker provenance: verified"
           if node deploy/updater/verify-bundled-provenance.mjs --gh "$bundled_gh" --service api --repository ghcr.io/pona-ekolo/pe-community-web --digest "$HISTORICAL_API_DIGEST" --release-tag "$PROVENANCE_TEST_RELEASE_TAG" --source-commit "$PROVENANCE_TEST_SOURCE_COMMIT"; then
             echo "PROVENANCE_POLICY_REPOSITORY_MISMATCH_NOT_REJECTED" >&2
             exit 1
