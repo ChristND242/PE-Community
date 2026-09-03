@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "push" ]]; then
-            RELEASE_REF="$RELEASE_REF" RELEASE_REF_TYPE="$REF_TYPE" CHECKOUT_SHA="$DISPATCH_SHA" .github/scripts/validate-release-ref.sh
+            RELEASE_REF="$RELEASE_REF" RELEASE_REF_TYPE="$REF_TYPE" CHECKOUT_SHA="$DISPATCH_SHA" bash .github/scripts/validate-release-ref.sh
             source_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
             echo "build_version=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
             echo "version=$RELEASE_TAG" >> "$GITHUB_OUTPUT"

@@ -1,7 +1,30 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { validateManifest } from './domain.js';
+
+test('release validator remains executable and is invoked through Bash', async () => {
+  const [workflow, stage] = await Promise.all([
+    readFile(
+      new URL('../../../.github/workflows/publish-images.yml', import.meta.url),
+      'utf8',
+    ),
+    Promise.resolve(
+      execFileSync(
+        'git',
+        ['ls-files', '--stage', '.github/scripts/validate-release-ref.sh'],
+        {
+          cwd: new URL('../../..', import.meta.url),
+          encoding: 'utf8',
+        },
+      ),
+    ),
+  ]);
+
+  assert.match(stage, /^100755 /);
+  assert.match(workflow, /bash \.github\/scripts\/validate-release-ref\.sh/);
+});
 
 test('release workflow is SHA-pinned, least-privilege, draft-first, and inventory-gated', async () => {
   const workflow = await readFile(
@@ -40,6 +63,14 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   );
   assert.match(workflow, /gh release create[^\n]+--draft/);
   assert.match(workflow, /\.github\/scripts\/validate-release-ref\.sh/);
+  assert.match(
+    workflow,
+    /RELEASE_REF="\$RELEASE_REF" RELEASE_REF_TYPE="\$REF_TYPE" CHECKOUT_SHA="\$DISPATCH_SHA" bash \.github\/scripts\/validate-release-ref\.sh/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /CHECKOUT_SHA="\$DISPATCH_SHA" \.github\/scripts\/validate-release-ref\.sh/,
+  );
   assert.match(
     workflow,
     /RELEASE_REF="\$RELEASE_REF" RELEASE_REF_TYPE="\$REF_TYPE" CHECKOUT_SHA="\$DISPATCH_SHA"/,
