@@ -73,6 +73,43 @@ test('valid updater-aware releases compare against the immutable installed versi
   }
 });
 
+test('a v1.2.3 application recognizes the portable v1.2.6 release as an automatic update', async () => {
+  const fixture = createFixture({
+    ...stableSystem,
+    version: 'v1.2.3',
+  });
+  await withFetch(validReleaseResponses('v1.2.6'), async () => {
+    const result = await fixture.service.check('community-1');
+    assert.equal(result.installedVersion, 'v1.2.3');
+    assert.equal(result.latestVersion, 'v1.2.6');
+    assert.equal(result.status, 'UPDATE_AVAILABLE');
+    assert.equal(result.errorCategory, null);
+    assert.equal(
+      (
+        result.releaseMetadata as {
+          database?: { migrationCompatibility?: string };
+          requiresManualAction?: boolean;
+          supplyChain?: { attestationPolicy?: string };
+        } | null
+      )?.database?.migrationCompatibility,
+      'FORWARD_ONLY',
+    );
+    assert.equal(
+      (result.releaseMetadata as { requiresManualAction?: boolean } | null)
+        ?.requiresManualAction,
+      false,
+    );
+    assert.equal(
+      (
+        result.releaseMetadata as {
+          supplyChain?: { attestationPolicy?: string };
+        } | null
+      )?.supplyChain?.attestationPolicy,
+      'GITHUB_PROVENANCE_REQUIRED',
+    );
+  });
+});
+
 test('a release missing an architecture-specific updater asset remains manual-only', async () => {
   for (const retainedAssets of [
     ['pe-community-updater-v1.2.0-linux-amd64.tar.gz'],
