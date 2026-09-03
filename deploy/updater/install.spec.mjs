@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -20,7 +20,10 @@ const override = await readFile(
   new URL('./docker-compose.updater.yml', import.meta.url),
   'utf8',
 );
-const operatorGuide = await readFile(new URL('./README.md', import.meta.url), 'utf8');
+const operatorGuide = await readFile(
+  new URL('./README.md', import.meta.url),
+  'utf8',
+);
 
 const digest =
   'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -65,6 +68,71 @@ async function runInstallerFunction(functionCall, releasePayload) {
   ]);
 }
 
+function elfHeader({
+  elfClass = 2,
+  dataEncoding = 1,
+  machine = 62,
+  length = 20,
+} = {}) {
+  const header = Buffer.alloc(20);
+  header.set([0x7f, 0x45, 0x4c, 0x46, elfClass, dataEncoding]);
+  if (dataEncoding === 2) header.writeUInt16BE(machine, 18);
+  else header.writeUInt16LE(machine, 18);
+  return header.subarray(0, length);
+}
+
+async function validateElfFixture(header, targetArch, options = {}) {
+  const directory = await mkdtemp(join(tmpdir(), 'pe-updater-elf-spec-'));
+  const binary = join(directory, 'gh');
+  if (options.symlink) await symlink('/dev/null', binary);
+  else await writeFile(binary, header);
+  if (options.executable !== false && !options.symlink)
+    await chmod(binary, 0o755);
+  const script = [
+    'installer=$1',
+    'binary=$2',
+    'target_arch=$3',
+    'set --',
+    'PE_UPDATER_INSTALLER_LIBRARY=1',
+    'export PE_UPDATER_INSTALLER_LIBRARY',
+    '. "$installer"',
+    'readelf() { exit 97; }',
+    'file() { exit 98; }',
+    'validate_bundled_gh_elf "$binary" "$target_arch"',
+  ].join('\n');
+  return execFileAsync('sh', [
+    '-ceu',
+    script,
+    '_',
+    new URL('./install.sh', import.meta.url).pathname,
+    binary,
+    targetArch,
+  ]);
+}
+
+async function validateVersionFixture(version) {
+  const directory = await mkdtemp(join(tmpdir(), 'pe-updater-version-spec-'));
+  const binary = join(directory, 'gh');
+  await writeFile(binary, `#!/bin/sh\nprintf '%s\\n' '${version}'\n`);
+  await chmod(binary, 0o755);
+  const script = [
+    'installer=$1',
+    'binary=$2',
+    'set --',
+    'PE_UPDATER_INSTALLER_LIBRARY=1',
+    'export PE_UPDATER_INSTALLER_LIBRARY',
+    '. "$installer"',
+    'validate_bundled_gh_version "$binary"',
+  ].join('\n');
+  return execFileAsync('sh', [
+    '-ceu',
+    script,
+    '_',
+    new URL('./install.sh', import.meta.url).pathname,
+    binary,
+  ]);
+}
+
 test('portable bootstrap derives paths from the validated project and package roots', () => {
   assert.match(installer, /--project-dir DIR/);
   assert.match(installer, /docker-compose\.prod\.yml/);
@@ -82,6 +150,66 @@ test('portable bootstrap derives paths from the validated project and package ro
   assert.match(installer, /Invalid project path/);
   assert.match(installer, /safe_path/);
   assert.match(installer, /install_unit/);
+  assert.match(installer, /validate_bundled_gh_elf/);
+  assert.match(installer, /UPDATER_BUNDLE_NOT_ELF/);
+  assert.match(installer, /UPDATER_BUNDLE_ARCHITECTURE_MISMATCH/);
+  assert.match(installer, /UPDATER_BUNDLED_GH_VERSION_MISMATCH/);
+  assert.doesNotMatch(installer, /command -v readelf|readelf -h/);
+  assert.doesNotMatch(installer, /command -v file|file -/);
+});
+
+test('ELF architecture validation accepts the production amd64 header without readelf or file', async () => {
+  await validateElfFixture(elfHeader(), 'linux-amd64');
+});
+
+test('ELF architecture validation accepts AArch64 and both supported byte orders', async () => {
+  await validateElfFixture(elfHeader({ machine: 183 }), 'linux-arm64');
+  await validateElfFixture(
+    elfHeader({ dataEncoding: 2, machine: 62 }),
+    'linux-amd64',
+  );
+  await validateElfFixture(
+    elfHeader({ dataEncoding: 2, machine: 183 }),
+    'linux-arm64',
+  );
+});
+
+test('ELF architecture validation rejects mismatched or unsupported machines', async () => {
+  await assert.rejects(
+    validateElfFixture(elfHeader({ machine: 183 }), 'linux-amd64'),
+    /UPDATER_BUNDLE_ARCHITECTURE_MISMATCH: Bundled updater architecture does not match this host\./,
+  );
+  await assert.rejects(
+    validateElfFixture(elfHeader(), 'linux-arm64'),
+    /UPDATER_BUNDLE_ARCHITECTURE_MISMATCH: Bundled updater architecture does not match this host\./,
+  );
+  await assert.rejects(
+    validateElfFixture(elfHeader({ machine: 3 }), 'linux-amd64'),
+    /UPDATER_BUNDLE_ARCHITECTURE_MISMATCH/,
+  );
+});
+
+test('ELF architecture validation rejects malformed, non-executable, and symlinked binaries', async () => {
+  for (const options of [
+    { header: Buffer.alloc(20) },
+    { header: elfHeader({ elfClass: 1 }) },
+    { header: elfHeader({ length: 19 }) },
+    { header: elfHeader(), executable: false },
+    { header: elfHeader(), symlink: true },
+  ]) {
+    await assert.rejects(
+      validateElfFixture(options.header, 'linux-amd64', options),
+      /UPDATER_BUNDLE_NOT_ELF: Bundled updater executable is invalid\./,
+    );
+  }
+});
+
+test('bundled GitHub CLI requires the pinned native version', async () => {
+  await validateVersionFixture('gh version 2.93.0 (2026-05-27)');
+  await assert.rejects(
+    validateVersionFixture('gh version 2.92.0 (2026-05-27)'),
+    /UPDATER_BUNDLED_GH_VERSION_MISMATCH: Bundled GitHub CLI version is invalid\./,
+  );
 });
 
 test('generated host integration keeps updater socket access API-only', () => {
@@ -137,8 +265,14 @@ test('operator guidance keeps updater package selection separate from the applic
     operatorGuide,
     /finds the newest published stable release with the complete portable updater contract/,
   );
-  assert.match(operatorGuide, /does not update the application or change `PE_COMMUNITY_VERSION`/);
-  assert.match(operatorGuide, /`--version` selects the updater package release only/);
+  assert.match(
+    operatorGuide,
+    /does not update the application or change `PE_COMMUNITY_VERSION`/,
+  );
+  assert.match(
+    operatorGuide,
+    /`--version` selects the updater package release only/,
+  );
   assert.doesNotMatch(operatorGuide, /the version in `\.env` by default/);
 });
 

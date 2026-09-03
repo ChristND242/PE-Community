@@ -140,6 +140,31 @@ release_asset() {
   actual=$(sha256sum "$destination" | awk '{print $1}')
   [ "sha256:$actual" = "$digest" ] || fail_code UPDATER_ASSET_DIGEST_MISMATCH "Updater package verification failed for $tag."
 }
+validate_bundled_gh_elf() {
+  binary=$1 target_arch=$2
+  [ -f "$binary" ] && [ ! -L "$binary" ] && [ -x "$binary" ] || fail_code UPDATER_BUNDLE_NOT_ELF 'Bundled updater executable is invalid.'
+  header=$(od -An -N20 -tx1 "$binary" 2>/dev/null | tr -d '[:space:]') || fail_code UPDATER_BUNDLE_NOT_ELF 'Bundled updater executable is invalid.'
+  printf '%s' "$header" | grep -Eq '^[0-9a-f]{40}$' || fail_code UPDATER_BUNDLE_NOT_ELF 'Bundled updater executable is invalid.'
+  magic=$(printf '%s' "$header" | cut -c1-8)
+  elf_class=$(printf '%s' "$header" | cut -c9-10)
+  data_encoding=$(printf '%s' "$header" | cut -c11-12)
+  machine=$(printf '%s' "$header" | cut -c37-40)
+  [ "$magic" = 7f454c46 ] && [ "$elf_class" = 02 ] || fail_code UPDATER_BUNDLE_NOT_ELF 'Bundled updater executable is invalid.'
+  case "$data_encoding" in
+    01)
+      case "$target_arch" in linux-amd64) expected_machine=3e00;; linux-arm64) expected_machine=b700;; *) fail 'Unsupported host architecture.';; esac
+      ;;
+    02)
+      case "$target_arch" in linux-amd64) expected_machine=003e;; linux-arm64) expected_machine=00b7;; *) fail 'Unsupported host architecture.';; esac
+      ;;
+    *) fail_code UPDATER_BUNDLE_NOT_ELF 'Bundled updater executable is invalid.';;
+  esac
+  [ "$machine" = "$expected_machine" ] || fail_code UPDATER_BUNDLE_ARCHITECTURE_MISMATCH 'Bundled updater architecture does not match this host.'
+}
+validate_bundled_gh_version() {
+  binary=$1
+  "$binary" version | head -n1 | grep -Eq '^gh version 2\.93\.0 ' || fail_code UPDATER_BUNDLED_GH_VERSION_MISMATCH 'Bundled GitHub CLI version is invalid.'
+}
 install_bundle() {
   project=$1 archive=$2 target_arch=$3
   install_root="$project/.pe/updater"
@@ -150,11 +175,9 @@ install_bundle() {
   entries=$(tar -tzf "$archive") || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
   printf '%s\n' "$entries" | grep -Eq '^pe-community-updater/(bin/pe-community-updater|bin/gh|dist/server.js|deploy/install.sh)$' || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
   printf '%s\n' "$entries" | grep -Eq '(^/|(^|/)\.\.(/|$))' && fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
-  [ -f "$package/bin/pe-community-updater" ] && [ -f "$package/bin/gh" ] && [ ! -L "$package/bin/gh" ] && [ -x "$package/bin/gh" ] || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
-  case "$target_arch" in linux-amd64) expected_machine='Advanced Micro Devices X86-64';; linux-arm64) expected_machine='AArch64';; *) fail 'Unsupported host architecture.';; esac
-  command -v readelf >/dev/null 2>&1 || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
-  readelf -h "$package/bin/gh" | grep -F "Machine:                           $expected_machine" >/dev/null || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
-  "$package/bin/gh" version | head -n1 | grep -Eq '^gh version 2\.93\.0 ' || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
+  [ -f "$package/bin/pe-community-updater" ] || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
+  validate_bundled_gh_elf "$package/bin/gh" "$target_arch"
+  validate_bundled_gh_version "$package/bin/gh"
   mkdir -p "$project/.pe"
   chown root:root "$project/.pe"
   chmod 0755 "$project/.pe"
