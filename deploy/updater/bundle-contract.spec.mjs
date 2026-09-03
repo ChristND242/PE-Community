@@ -59,6 +59,8 @@ test('updater bundle inventory requires the embedded verifier and license', () =
     'pe-community-updater/deploy/SECURITY.md',
     'pe-community-updater/deploy/pe-community-updater.service',
     'pe-community-updater/deploy/pe-community-updater.env.example',
+    'pe-community-updater/deploy/docker-compose.updater.yml',
+    'pe-community-updater/deploy/install.sh',
   ];
   assert.doesNotThrow(() => verifyBundleEntries(entries));
   assert.throws(

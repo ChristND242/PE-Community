@@ -8,13 +8,21 @@ PE Community v1.2.3 is the updater bootstrap release. An installation running v1
 
 ## Install once
 
-1. Download the architecture-matched updater asset from the approved PE Community release: `pe-community-updater-<version>-linux-amd64.tar.gz` or `pe-community-updater-<version>-linux-arm64.tar.gz`. Verify it through the release contract, extract it as root into a staging directory, then atomically replace `/opt/pe-community-updater`. The archive records root ownership and safe non-writable modes; normalize the extracted tree with `chown -R root:root` and remove group/other write bits before the replacement.
-2. The archive includes the pinned official GitHub CLI verifier at `/opt/pe-community-updater/bin/gh`, its MIT license notice, and the updater launcher. Do not install `gh` separately and do not replace the bundled verifier.
-3. Create the system group `pe-community-updater` and add the host account used by the API container runtime to the matching socket-access arrangement.
-4. Create root-owned directories `/etc/pe-community-updater` and `/opt/pe-community-backups` with mode `0700`. The unit creates `/var/lib/pe-community-updater` with mode `0700` and `/run/pe-community-updater` with mode `0750` through systemd's state/runtime directory lifecycle.
-5. Copy `pe-community-updater.env.example` to `/etc/pe-community-updater/updater.env`, set mode `0600`, and replace the secret placeholder with a newly generated high-entropy value. Put the same value in the production application `.env` as `PE_UPDATER_SHARED_SECRET`.
-6. Install `pe-community-updater.service`, run `systemctl daemon-reload`, then enable and start the service.
-7. Recreate only the API container once so its read-only `/run/pe-community-updater` bind mount and shared secret take effect.
+From the PE Community project directory, run:
+
+```bash
+sudo ./deploy/updater/install.sh
+```
+
+The installer detects the project, selects the host architecture, obtains the matching asset from the requested stable release (the version in `.env` by default), verifies the official release asset digest, installs the package at `<project-root>/.pe/updater`, configures the authenticated API-only socket override, writes the systemd environment, starts the service, and recreates only the API. It does not update the application.
+
+Use an explicit stable release when needed:
+
+```bash
+sudo ./deploy/updater/install.sh --project-dir /path/to/pe-community --version vX.Y.Z
+```
+
+The package carries its pinned `gh` verifier at `<updater-root>/bin/gh`. Runtime resolution is relative to the installed package; the updater never uses a host `gh` from `PATH`.
 
 ## Verify the bootstrap
 
@@ -23,17 +31,27 @@ Run these commands on the deployment host before enabling UI installation:
 ```bash
 systemctl is-active pe-community-updater
 systemctl show pe-community-updater -p User -p Group -p NoNewPrivileges -p ProtectSystem
-/opt/pe-community-updater/bin/gh version
+<project-root>/.pe/updater/bin/gh version
 stat -c '%U %G %a %F' /run/pe-community-updater /run/pe-community-updater/updater.sock
-docker compose --env-file .env -f docker-compose.prod.yml ps
-docker compose --env-file .env -f docker-compose.prod.yml exec -T api test -S /run/pe-community-updater/updater.sock
+docker compose --env-file .env -f docker-compose.prod.yml -f .pe/updater/docker-compose.updater.yml ps
+docker compose --env-file .env -f docker-compose.prod.yml -f .pe/updater/docker-compose.updater.yml exec -T api test -S /run/pe-community-updater/updater.sock
 ```
 
 The directory must not be world-writable, the socket must report mode `660`, and only API receives the read-only runtime-directory mount. The status response must report agent `1.4.0`, protocol `2`, and topology `single-host`. Validate Settings → System Updates status before attempting an installation.
 
-## Migrate an existing v1.2.3 updater host
+## Repair or uninstall
 
-The v1.2.3 updater expects the historical single updater asset and cannot discover the architecture-specific archive inventory introduced with updater 1.4.0. At the next maintenance window, stop the updater, verify the appropriate new release archive, extract it as root into a staging directory, validate `bin/gh` and its license notice, run `chown -R root:root <staging>/pe-community-updater` and `chmod -R go-w <staging>/pe-community-updater`, then atomically replace `/opt/pe-community-updater` and restart the service. This replaces the updater and its bundled verifier as one unit. Retain the previous directory until the restarted service reports healthy. Do not overwrite `bin/gh` in place and do not change application containers, PostgreSQL, Redis, or uploads as part of this host-side migration. PE Community no longer depends on `/usr/bin/gh`; leave any host installation intact unless the administrator independently knows it is unused.
+Re-run the command to repair or replace the local updater package safely:
+
+```bash
+sudo ./deploy/updater/install.sh --repair
+```
+
+To remove updater host integration without touching application data, database data, uploads, Redis data, or application images:
+
+```bash
+sudo ./deploy/updater/install.sh --uninstall
+```
 
 ## Maintainer supply-chain validation
 
@@ -43,7 +61,7 @@ The workflow extracts `gh` from the generated amd64 updater archive and performs
 
 Validation mode does not create a tag, GitHub Release, or deployment, and normal update discovery ignores it because discovery uses published GitHub Releases rather than GHCR tags or workflow artifacts. Validation tags may remain in GHCR temporarily; remove only the explicitly named validation tags through normal package administration. Stable tag pushes retain the release publication path. The CI-only `main` assertion is not available to the runtime updater, which continues to require the fixed production tag-bound provenance policy.
 
-The service intentionally runs with host Docker access, fixed paths, a strict image allowlist, and no remote listener. `ProtectSystem=strict` is paired with explicit `ReadWritePaths` for the deployment version file, backups, durable state, and runtime socket. Network address families remain available because release discovery and registry pulls require them.
+The service intentionally runs with host Docker access, a strict image allowlist, and no remote listener. The installer writes the selected project, package, backup, state, and runtime paths into its environment; `ProtectSystem=strict` is paired with those explicit writable paths. Network address families remain available because release discovery and registry pulls require them.
 
 ## Automatic release contract
 
@@ -70,7 +88,7 @@ Never place either secret in command arguments or logs. The previous-secret sett
 
 Stop the service before replacing the updater files, verify the release artifact, replace the directory atomically, and start it again. If a target manifest requires a newer updater, the application reports `MANUAL_REQUIRED` and does not install the release.
 
-To disable automatic updates, stop and disable the service, remove the API socket bind mount at the next maintenance window, and retain `/var/lib/pe-community-updater` plus the latest backup until the deployment is verified.
+To disable automatic updates, run the supported uninstall command and retain the project-local updater state and latest backup until the deployment is verified.
 
 To roll back the bootstrap itself, disable the service, restore the pre-bootstrap Compose file and `.env`, recreate API only, and verify normal application health. This removes updater access without changing PostgreSQL, Redis, Web, Worker, uploads, or application data.
 

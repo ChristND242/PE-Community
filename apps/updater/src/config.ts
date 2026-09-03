@@ -1,9 +1,12 @@
 import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type UpdaterConfig = {
+  updaterRoot: string;
   deploymentRoot: string;
   composeFile: string;
+  composeOverrideFile: string | null;
   envFile: string;
   caddyFile: string;
   stateDir: string;
@@ -22,13 +25,16 @@ export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): UpdaterConfig {
   const deploymentRoot = fixedDirectory(
-    environment.PE_UPDATER_DEPLOYMENT_ROOT ?? '/opt/pe-community-management',
+    environment.PE_UPDATER_DEPLOYMENT_ROOT ?? process.cwd(),
   );
+  assertProjectRoot(deploymentRoot);
   const stateDir = fixedDirectory(
-    environment.PE_UPDATER_STATE_DIR ?? '/var/lib/pe-community-updater',
+    environment.PE_UPDATER_STATE_DIR ??
+      join(deploymentRoot, '.pe/updater/state'),
   );
   const backupRoot = fixedDirectory(
-    environment.PE_UPDATER_BACKUP_ROOT ?? '/opt/pe-community-backups',
+    environment.PE_UPDATER_BACKUP_ROOT ??
+      join(deploymentRoot, '.pe/updater/backups'),
   );
   const sharedSecret = environment.PE_UPDATER_SHARED_SECRET ?? '';
   if (sharedSecret.length < 32)
@@ -44,8 +50,12 @@ export function loadConfig(
   if (previousSharedSecret === sharedSecret)
     throw new Error('Updater current and previous secrets must differ.');
   return {
+    updaterRoot: updaterInstallRoot(),
     deploymentRoot,
     composeFile: fixedChild(deploymentRoot, 'docker-compose.prod.yml'),
+    composeOverrideFile: optionalFixedFile(
+      environment.PE_UPDATER_COMPOSE_OVERRIDE,
+    ),
     envFile: fixedChild(deploymentRoot, '.env'),
     caddyFile: fixedChild(deploymentRoot, 'deploy/Caddyfile'),
     stateDir,
@@ -77,6 +87,37 @@ export function loadConfig(
   };
 }
 
+function optionalFixedFile(path: string | undefined) {
+  return path?.trim() ? fixedFile(path) : null;
+}
+
+function fixedFile(path: string) {
+  const resolved = resolve(path);
+  const stat = lstatSync(resolved);
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    realpathSync(resolved) !== resolved
+  )
+    throw new Error(`Unsafe updater file: ${resolved}`);
+  return resolved;
+}
+
+/** The package root is derived from this module, never from PATH or an environment override. */
+export function updaterInstallRoot(moduleUrl = import.meta.url) {
+  return fixedDirectory(resolve(dirname(fileURLToPath(moduleUrl)), '..'));
+}
+
+export function bundledVerifierPath(moduleUrl = import.meta.url) {
+  return resolve(updaterInstallRoot(moduleUrl), 'bin/gh');
+}
+
+function assertProjectRoot(root: string) {
+  fixedChild(root, 'docker-compose.prod.yml');
+  fixedChild(root, '.env');
+  fixedChild(root, 'deploy/Caddyfile');
+}
+
 function fixedDirectory(path: string) {
   const resolved = resolve(path);
   const stat = lstatSync(resolved);
@@ -93,14 +134,7 @@ function fixedChild(root: string, child: string) {
   const candidate = resolve(root, child);
   if (!candidate.startsWith(`${root}/`))
     throw new Error('Updater path escaped deployment root.');
-  const stat = lstatSync(candidate);
-  if (
-    !stat.isFile() ||
-    stat.isSymbolicLink() ||
-    realpathSync(candidate) !== candidate
-  )
-    throw new Error(`Unsafe updater file: ${candidate}`);
-  return candidate;
+  return fixedFile(candidate);
 }
 
 function fixedSocketPath(path: string) {

@@ -59,6 +59,8 @@ export function verifyBundleEntries(entries) {
     'pe-community-updater/deploy/SECURITY.md',
     'pe-community-updater/deploy/pe-community-updater.service',
     'pe-community-updater/deploy/pe-community-updater.env.example',
+    'pe-community-updater/deploy/docker-compose.updater.yml',
+    'pe-community-updater/deploy/install.sh',
   ]);
   for (const entry of entries) {
     if (

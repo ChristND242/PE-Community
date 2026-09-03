@@ -3,6 +3,7 @@ import { lstatSync, realpathSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { bundledVerifierPath } from './config.js';
 import { sanitizeLog } from './domain.js';
 import type { CommandExecutor } from './executor.js';
 
@@ -13,14 +14,13 @@ export const PROVENANCE_POLICY = Object.freeze({
     'Pona-Ekolo/PE-Community/.github/workflows/publish-images.yml',
   workflowPath: '.github/workflows/publish-images.yml',
   predicateType: 'https://slsa.dev/provenance/v1',
-  verifierExecutable: '/opt/pe-community-updater/bin/gh',
   verifierVersion: '2.93.0',
   timeoutMs: 60_000,
   maximumOutputBytes: 1024 * 1024,
 } as const);
 
 const VERIFIER_ENV: NodeJS.ProcessEnv = Object.freeze({
-  HOME: '/var/lib/pe-community-updater',
+  HOME: process.env.PE_UPDATER_STATE_DIR ?? tmpdir(),
   LANG: 'C.UTF-8',
   LC_ALL: 'C.UTF-8',
   NO_COLOR: '1',
@@ -84,6 +84,7 @@ export class GitHubCliProvenanceVerifier implements ProvenanceVerifier {
   constructor(
     private readonly executor: CommandExecutor,
     private readonly inspectVerifier: () => void = assertBundledVerifier,
+    private readonly verifierExecutable = bundledVerifierPath(),
   ) {}
 
   async preflight() {
@@ -92,7 +93,7 @@ export class GitHubCliProvenanceVerifier implements ProvenanceVerifier {
     let output: string;
     try {
       const result = await this.executor.run(
-        PROVENANCE_POLICY.verifierExecutable,
+        this.verifierExecutable,
         ['version'],
         {
           timeoutMs: 10_000,
@@ -126,7 +127,7 @@ export class GitHubCliProvenanceVerifier implements ProvenanceVerifier {
     let output: string;
     try {
       const result = await this.executor.run(
-        PROVENANCE_POLICY.verifierExecutable,
+        this.verifierExecutable,
         provenanceVerifierArgs(input),
         {
           timeoutMs: PROVENANCE_POLICY.timeoutMs,
@@ -192,6 +193,7 @@ export class GitHubCliManifestAttestationVerifier implements ManifestAttestation
   constructor(
     private readonly executor: CommandExecutor,
     private readonly inspectVerifier: () => void = assertBundledVerifier,
+    private readonly verifierExecutable = bundledVerifierPath(),
   ) {}
 
   async verify(input: {
@@ -212,6 +214,7 @@ export class GitHubCliManifestAttestationVerifier implements ManifestAttestation
     this.verifierVersion ??= await preflightVerifier(
       this.executor,
       mapManifestVerifierError,
+      this.verifierExecutable,
     );
     const directory = await mkdtemp(join(tmpdir(), 'pe-community-manifest-'));
     const manifestPath = join(directory, 'pe-community-update-manifest.json');
@@ -219,7 +222,7 @@ export class GitHubCliManifestAttestationVerifier implements ManifestAttestation
     try {
       await writeFile(manifestPath, input.payload, { flag: 'wx', mode: 0o600 });
       const result = await this.executor.run(
-        PROVENANCE_POLICY.verifierExecutable,
+        this.verifierExecutable,
         [
           'attestation',
           'verify',
@@ -272,11 +275,12 @@ export class GitHubCliManifestAttestationVerifier implements ManifestAttestation
 async function preflightVerifier(
   executor: CommandExecutor,
   mapError: (error: unknown) => ProvenanceError,
+  verifierExecutable: string,
 ) {
   let output: string;
   try {
     output = (
-      await executor.run(PROVENANCE_POLICY.verifierExecutable, ['version'], {
+      await executor.run(verifierExecutable, ['version'], {
         timeoutMs: 10_000,
         maxOutputBytes: 64 * 1024,
         env: VERIFIER_ENV,
@@ -294,7 +298,7 @@ async function preflightVerifier(
 }
 
 export function assertBundledVerifier(
-  file = PROVENANCE_POLICY.verifierExecutable,
+  file = bundledVerifierPath(),
   inspect: VerifierFileInspector = { lstat: lstatSync, realpath: realpathSync },
 ) {
   let stat: ReturnType<VerifierFileInspector['lstat']>;

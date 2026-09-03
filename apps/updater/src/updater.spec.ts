@@ -373,7 +373,7 @@ async function fixtureAgent(
   await writeFile(envFile, 'PE_COMMUNITY_VERSION="v1.0.0"\nPOSTGRES_PASSWORD=x\nJWT_SECRET=x\nPASSWORD_PEPPER=x\nEMAIL_ENCRYPTION_KEY=x\nWEB_ORIGIN=https://example.test\n');
   await writeFile(composeFile, 'services: {}\n');
   await writeFile(caddyFile, ':80 {}\n');
-  const config: UpdaterConfig = { deploymentRoot, stateDir, backupRoot, envFile, composeFile, caddyFile, socketPath: join(root, 'updater.sock'), sharedSecret: 'x'.repeat(32), previousSharedSecret: null, minimumFreeBytes: 1, backupRetention: 5, publicApiHealthUrl: 'https://example.test/health', publicWebHealthUrl: 'https://example.test/login', topology: 'single-host' };
+  const config: UpdaterConfig = { updaterRoot: root, deploymentRoot, stateDir, backupRoot, envFile, composeFile, composeOverrideFile: null, caddyFile, socketPath: join(root, 'updater.sock'), sharedSecret: 'x'.repeat(32), previousSharedSecret: null, minimumFreeBytes: 1, backupRetention: 5, publicApiHealthUrl: 'https://example.test/health', publicWebHealthUrl: 'https://example.test/login', topology: 'single-host' };
   const store = new AgentStore(stateDir);
   const executor = new FakeExecutor(releaseManifest);
   const release: AgentRelease = {

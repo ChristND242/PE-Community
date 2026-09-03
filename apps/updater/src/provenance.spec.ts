@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type {
   CommandExecutor,
@@ -14,6 +17,7 @@ import {
   PROVENANCE_POLICY,
   ProvenanceError,
 } from './provenance.js';
+import { bundledVerifierPath, updaterInstallRoot } from './config.js';
 
 const digest = `sha256:${'a'.repeat(64)}`;
 const sourceCommit = 'd'.repeat(40);
@@ -31,12 +35,12 @@ test('official verifier uses the bundled executable, exact digest, and immutable
   assert.equal(result.result, 'VERIFIED');
   assert.equal(result.digest, digest);
   assert.deepEqual(executor.calls[0], {
-    executable: '/opt/pe-community-updater/bin/gh',
+    executable: bundledVerifierPath(),
     args: ['version'],
     timeoutMs: 10_000,
     maxOutputBytes: 64 * 1024,
     env: {
-      HOME: '/var/lib/pe-community-updater',
+      HOME: tmpdir(),
       LANG: 'C.UTF-8',
       LC_ALL: 'C.UTF-8',
       NO_COLOR: '1',
@@ -80,6 +84,23 @@ test('official verifier uses the bundled executable, exact digest, and immutable
     'PATH',
   ]);
   assert.equal(executor.calls[1]?.env?.GH_TOKEN, undefined);
+});
+
+test('bundled verifier resolution follows the installed package instead of a fixed host path', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'pe-updater-relocation-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  for (const relative of ['updater/dist', 'nested/community-updater/dist']) {
+    const packageRoot = join(root, relative.replace('/dist', ''));
+    await mkdir(join(packageRoot, 'dist'), { recursive: true });
+    const moduleUrl = new URL(
+      `file://${join(packageRoot, 'dist', 'config.js')}`,
+    ).href;
+    assert.equal(updaterInstallRoot(moduleUrl), packageRoot);
+    assert.equal(
+      bundledVerifierPath(moduleUrl),
+      join(packageRoot, 'bin', 'gh'),
+    );
+  }
 });
 
 test('verifier fails deterministically when missing, wrong-version, timed out, or output-bounded', async () => {
@@ -338,14 +359,14 @@ test('bundled verifier inspection rejects a missing, symlinked, writable, or non
     uid: 0,
   };
   assert.doesNotThrow(() =>
-    assertBundledVerifier('/opt/pe-community-updater/bin/gh', {
+    assertBundledVerifier('/tmp/pe-community-updater/bin/gh', {
       lstat: () => valid,
       realpath: (path) => path,
     }),
   );
   assert.throws(
     () =>
-      assertBundledVerifier('/opt/pe-community-updater/bin/gh', {
+      assertBundledVerifier('/tmp/pe-community-updater/bin/gh', {
         lstat: () => {
           throw systemError('ENOENT');
         },
@@ -362,7 +383,7 @@ test('bundled verifier inspection rejects a missing, symlinked, writable, or non
   ]) {
     assert.throws(
       () =>
-        assertBundledVerifier('/opt/pe-community-updater/bin/gh', {
+        assertBundledVerifier('/tmp/pe-community-updater/bin/gh', {
           lstat: () => stat,
           realpath: (path) => path,
         }),

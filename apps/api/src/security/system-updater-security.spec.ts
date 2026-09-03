@@ -127,13 +127,15 @@ test('update execution is protected by permission and existing recent-auth step-
 });
 
 test('application deployment does not mount the Docker socket', async () => {
-  const compose = await readFile(
-    new URL('../../../../docker-compose.prod.yml', import.meta.url),
-    'utf8',
-  );
+  const [compose, updaterOverride] = await Promise.all([
+    readFile(new URL('../../../../docker-compose.prod.yml', import.meta.url), 'utf8'),
+    readFile(new URL('../../../../deploy/updater/docker-compose.updater.yml', import.meta.url), 'utf8'),
+  ]);
   assert.doesNotMatch(compose, /\/var\/run\/docker\.sock|\/run\/docker\.sock/);
-  assert.match(compose, /PE_UPDATER_RUNTIME_DIR/);
-  assert.match(compose, /\/run\/pe-community-updater:ro/);
+  assert.match(updaterOverride, /^  api:/m);
+  assert.match(updaterOverride, /PE_UPDATER_RUNTIME_DIR/);
+  assert.match(updaterOverride, /\/run\/pe-community-updater:ro/);
+  assert.doesNotMatch(updaterOverride, /^  (web|worker):/m);
 });
 
 test('automatic release discovery requires provenance contract while the agent remains authoritative', async () => {

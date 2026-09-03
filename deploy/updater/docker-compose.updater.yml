@@ -1,0 +1,10 @@
+services:
+  api:
+    group_add:
+      - '${PE_UPDATER_SOCKET_GID:?set PE_UPDATER_SOCKET_GID in .env}'
+    environment:
+      PE_UPDATER_SOCKET: ${PE_UPDATER_SOCKET:-/run/pe-community-updater/updater.sock}
+      PE_UPDATER_SHARED_SECRET: ${PE_UPDATER_SHARED_SECRET:-}
+    volumes:
+      # Only the API receives the authenticated updater socket; Docker remains host-only.
+      - ${PE_UPDATER_RUNTIME_DIR:-/run/pe-community-updater}:/run/pe-community-updater:ro

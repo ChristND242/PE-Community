@@ -388,7 +388,16 @@ export class UpdaterAgent {
   }
 
   private composePrefix() {
-    return ['compose', '--env-file', this.config.envFile, '-f', this.config.composeFile];
+    return [
+      'compose',
+      '--env-file',
+      this.config.envFile,
+      '-f',
+      this.config.composeFile,
+      ...(this.config.composeOverrideFile
+        ? ['-f', this.config.composeOverrideFile]
+        : []),
+    ];
   }
 
   private compose(args: readonly string[], timeoutMs: number) {

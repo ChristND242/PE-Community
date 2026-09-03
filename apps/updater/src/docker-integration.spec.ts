@@ -158,6 +158,8 @@ test(
         target: async () => release,
       };
       const config: UpdaterConfig = {
+        updaterRoot: root,
+        composeOverrideFile: null,
         deploymentRoot,
         composeFile,
         envFile,

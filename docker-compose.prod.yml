@@ -48,12 +48,9 @@ services:
       SECURITY_EVENT_RETENTION_DAYS: ${SECURITY_EVENT_RETENTION_DAYS:-180}
       SESSION_SECURITY_METADATA_RETENTION_DAYS: ${SESSION_SECURITY_METADATA_RETENTION_DAYS:-180}
       PE_COMMUNITY_VERSION: ${PE_COMMUNITY_VERSION:?set PE_COMMUNITY_VERSION in .env}
-      PE_UPDATER_SOCKET: ${PE_UPDATER_SOCKET:-/run/pe-community-updater/updater.sock}
-      PE_UPDATER_SHARED_SECRET: ${PE_UPDATER_SHARED_SECRET:-}
       UPLOADS_DIR: /app/uploads
     volumes:
       - uploads_data:/app/uploads
-      - ${PE_UPDATER_RUNTIME_DIR:-/run/pe-community-updater}:/run/pe-community-updater:ro
     depends_on:
       postgres:
         condition: service_healthy
