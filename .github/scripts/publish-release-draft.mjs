@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const API_VERSION = '2022-11-28';
@@ -162,8 +163,10 @@ export async function publishReleaseDraftWithPolicy(api, input, policy) {
   if (!COMMIT_SHA.test(input.sourceCommit))
     fail('RELEASE_SOURCE_COMMIT_INVALID');
   if (
-    input.artifacts.length !== 3 ||
-    new Set(input.artifacts.map(({ name }) => name)).size !== 3
+    !Array.isArray(input.artifacts) ||
+    input.artifacts.length === 0 ||
+    new Set(input.artifacts.map(({ name }) => name)).size !==
+      input.artifacts.length
   ) {
     fail('RELEASE_EXPECTED_ASSETS_INVALID');
   }
@@ -263,6 +266,22 @@ export async function publishReleaseDraftWithPolicy(api, input, policy) {
 }
 
 export async function publishReleaseDraft(api, input) {
+  if (input.repository !== PRODUCTION_RELEASE_POLICY.repository)
+    fail('RELEASE_REPOSITORY_MISMATCH');
+  if (!PRODUCTION_RELEASE_POLICY.tagPattern.test(input.tag))
+    fail('RELEASE_TAG_INVALID');
+  const expectedArtifacts = new Set([
+    'pe-community-update-manifest.json',
+    'pe-community-update-manifest.attestation.json',
+    `pe-community-updater-${input.tag}-linux-amd64.tar.gz`,
+    `pe-community-updater-${input.tag}-linux-arm64.tar.gz`,
+  ]);
+  if (
+    input.artifacts.length !== expectedArtifacts.size ||
+    input.artifacts.some(({ name }) => !expectedArtifacts.has(name))
+  ) {
+    fail('RELEASE_EXPECTED_ASSETS_INVALID');
+  }
   return publishReleaseDraftWithPolicy(api, input, PRODUCTION_RELEASE_POLICY);
 }
 
@@ -383,10 +402,10 @@ export class GitHubReleaseApi {
   }
 }
 
-async function loadArtifact(path) {
+async function loadArtifact(path, name = basename(path)) {
   const [content, metadata] = await Promise.all([readFile(path), stat(path)]);
   return {
-    name: path,
+    name,
     content,
     size: metadata.size,
     digest: `sha256:${createHash('sha256').update(content).digest('hex')}`,
@@ -399,15 +418,19 @@ async function main() {
   const sourceCommit = process.env.SOURCE_COMMIT ?? '';
   const token = process.env.GH_TOKEN ?? '';
   const version = process.env.VERSION ?? '';
+  const artifactDirectory = process.env.RELEASE_ARTIFACT_DIRECTORY ?? '.';
   if (!token) fail('GITHUB_TOKEN_REQUIRED');
   if (version !== tag) fail('RELEASE_VERSION_MISMATCH');
 
   const names = [
     'pe-community-update-manifest.json',
     'pe-community-update-manifest.attestation.json',
-    `pe-community-updater-${version}.tar.gz`,
+    `pe-community-updater-${version}-linux-amd64.tar.gz`,
+    `pe-community-updater-${version}-linux-arm64.tar.gz`,
   ];
-  const artifacts = await Promise.all(names.map(loadArtifact));
+  const artifacts = await Promise.all(
+    names.map((name) => loadArtifact(join(artifactDirectory, name), name)),
+  );
   const release = await publishReleaseDraft(
     new GitHubReleaseApi(repository, token),
     {

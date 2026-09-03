@@ -9,7 +9,7 @@ import {
 } from './publish-release-draft.mjs';
 
 const repository = 'Pona-Ekolo/PE-Community';
-const tag = 'v1.2.1';
+const tag = 'v1.2.5';
 const sourceCommit = 'f2ad9c87a149b6506fbc9d290cb118ab94d236a4';
 const artifacts = [
   {
@@ -23,9 +23,14 @@ const artifacts = [
     digest: `sha256:${'b'.repeat(64)}`,
   },
   {
-    name: `pe-community-updater-${tag}.tar.gz`,
+    name: `pe-community-updater-${tag}-linux-amd64.tar.gz`,
     size: 30,
     digest: `sha256:${'c'.repeat(64)}`,
+  },
+  {
+    name: `pe-community-updater-${tag}-linux-arm64.tar.gz`,
+    size: 40,
+    digest: `sha256:${'d'.repeat(64)}`,
   },
 ];
 const input = { repository, tag, sourceCommit, artifacts };
@@ -51,7 +56,7 @@ function draft(overrides = {}) {
     upload_url:
       'https://uploads.github.com/repos/Pona-Ekolo/PE-Community/releases/41/assets{?name,label}',
     html_url:
-      'https://github.com/Pona-Ekolo/PE-Community/releases/tag/untagged-test',
+      'https://github.com/Pona-Ekolo/PE-Community/releases/tag/untagged-c1767672324eb91ee125',
     assets: [],
     ...overrides,
   };
@@ -61,6 +66,7 @@ class FakeApi {
   constructor(releases = []) {
     this.releases = structuredClone(releases);
     this.calls = [];
+    this.createdDraftUrls = [];
     this.nextId = 100;
   }
 
@@ -77,6 +83,7 @@ class FakeApi {
       name: createInput.name,
       target_commitish: createInput.sourceCommit,
     });
+    this.createdDraftUrls.push(release.html_url);
     this.releases.push(release);
     return structuredClone(release);
   }
@@ -153,6 +160,10 @@ class ConfigurableApi extends FakeApi {
   }
 
   async uploadAsset(release, artifact) {
+    if (this.options.uploadFailureWithoutAsset) {
+      this.calls.push(`upload:${artifact.name}`);
+      throw new Error('NETWORK_FAILURE');
+    }
     const uploaded = await super.uploadAsset(release, artifact);
     if (this.options.uploadFailure) throw new Error('NETWORK_FAILURE');
     return uploaded;
@@ -183,9 +194,37 @@ test('creates, rediscovers, fills, validates, and publishes a new draft by relea
   assert.equal(api.calls.filter((call) => call === 'create').length, 1);
   assert.equal(
     api.calls.filter((call) => call.startsWith('upload:')).length,
-    3,
+    artifacts.length,
   );
   assert.ok(api.calls.includes('publish:100'));
+});
+
+test('uses the created draft ID rather than its temporary untagged URL', async () => {
+  const api = new FakeApi();
+  api.nextId = 123456;
+  const result = await publishReleaseDraft(api, input);
+  assert.equal(result.id, 123456);
+  assert.equal(result.tag_name, tag);
+  assert.equal(result.draft, false);
+  assert.equal(
+    api.createdDraftUrls[0],
+    'https://github.com/Pona-Ekolo/PE-Community/releases/tag/untagged-c1767672324eb91ee125',
+  );
+  assert.ok(api.calls.includes('get:123456'));
+  assert.ok(api.calls.includes('publish:123456'));
+});
+
+test('leaves a newly created draft unpublished when upload reconciliation fails', async () => {
+  const api = new ConfigurableApi([], { uploadFailureWithoutAsset: true });
+  await assert.rejects(
+    () => publishReleaseDraft(api, input),
+    /RELEASE_ASSET_UPLOAD_UNKNOWN/,
+  );
+  assert.equal(api.releases[0].draft, true);
+  assert.equal(
+    api.calls.some((call) => call.startsWith('publish:')),
+    false,
+  );
 });
 
 test('resumes a listed draft when the public tag lookup would return 404', async () => {
@@ -200,7 +239,7 @@ test('resumes an exactly matching empty draft', async () => {
   await publishReleaseDraft(api, input);
   assert.equal(
     api.calls.filter((call) => call.startsWith('upload:')).length,
-    3,
+    artifacts.length,
   );
 });
 
@@ -210,7 +249,7 @@ test('keeps an exact existing asset and uploads only missing assets', async () =
   assert.equal(api.calls.includes(`upload:${artifacts[0].name}`), false);
   assert.equal(
     api.calls.filter((call) => call.startsWith('upload:')).length,
-    2,
+    artifacts.length - 1,
   );
 });
 
@@ -289,9 +328,12 @@ test('rerun after partial upload does not duplicate the release or exact assets'
   assert.equal(api.calls.includes('create'), false);
   assert.deepEqual(
     api.calls.filter((call) => call.startsWith('upload:')),
-    [`upload:${artifacts[2].name}`],
+    [`upload:${artifacts[2].name}`, `upload:${artifacts[3].name}`],
   );
-  assert.equal(new Set(api.releases[0].assets.map(({ name }) => name)).size, 3);
+  assert.equal(
+    new Set(api.releases[0].assets.map(({ name }) => name)).size,
+    artifacts.length,
+  );
 });
 
 test('does not require a just-created release to appear in the collection listing', async () => {
@@ -332,7 +374,7 @@ test('reconciles an unknown create outcome through listing without a second POST
   assert.equal(api.calls.filter((call) => call === 'create').length, 1);
   assert.equal(
     api.calls.filter((call) => call.startsWith('upload:')).length,
-    3,
+    artifacts.length,
   );
 });
 
@@ -407,7 +449,7 @@ test('reconciles an unknown asset upload outcome without uploading it twice', as
   await publishReleaseDraft(api, input);
   assert.equal(
     api.calls.filter((call) => call.startsWith('upload:')).length,
-    3,
+    artifacts.length,
   );
 });
 

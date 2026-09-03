@@ -394,6 +394,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate.outputs.source_commit }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: supply-chain-release-${{ github.run_id }}
@@ -403,43 +406,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.validate.outputs.build_version }}
           VERSION: ${{ needs.validate.outputs.build_version }}
-        working-directory: release-artifacts
+          SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
+          RELEASE_ARTIFACT_DIRECTORY: release-artifacts
         run: |
           set -euo pipefail
-          manifest="pe-community-update-manifest.json"
-          bundle="pe-community-update-manifest.attestation.json"
-          updaters=(
-            "pe-community-updater-${VERSION}-linux-amd64.tar.gz"
-            "pe-community-updater-${VERSION}-linux-arm64.tar.gz"
-          )
-
-          if existing="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>/dev/null)"; then
-            if [[ "$(jq -r '.draft' <<<"$existing")" != "true" ]]; then
-              echo "A published release already exists for $RELEASE_TAG; immutable reruns abort." >&2
-              exit 1
-            fi
-            if [[ "$(jq '.assets | length' <<<"$existing")" != "0" ]]; then
-              echo "The existing draft contains assets; refusing to overwrite or merge a partial release." >&2
-              exit 1
-            fi
-          else
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$RELEASE_TAG" --notes "PE Community $RELEASE_TAG"
-          fi
-
-          gh release upload "$RELEASE_TAG" "$manifest" "$bundle" "${updaters[@]}" --repo "$GITHUB_REPOSITORY"
-          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
-          [[ "$(jq -r '.draft' <<<"$release")" == "true" ]] || { echo "Release became visible before validation." >&2; exit 1; }
-          mapfile -t actual_names < <(jq -r '.assets[].name' <<<"$release" | sort)
-          mapfile -t expected_names < <(printf '%s\n' "$manifest" "$bundle" "${updaters[@]}" | sort)
-          [[ "${actual_names[*]}" == "${expected_names[*]}" ]] || { echo "Release asset inventory mismatch." >&2; exit 1; }
-
-          for file in "$manifest" "$bundle" "${updaters[@]}"; do
-            expected_digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
-            expected_size="$(stat -c '%s' "$file")"
-            remote_digest="$(jq -r --arg name "$file" '.assets[] | select(.name == $name) | .digest // empty' <<<"$release")"
-            remote_size="$(jq -r --arg name "$file" '.assets[] | select(.name == $name) | .size' <<<"$release")"
-            [[ "$remote_digest" == "$expected_digest" ]] || { echo "Release asset digest mismatch for $file." >&2; exit 1; }
-            [[ "$remote_size" == "$expected_size" ]] || { echo "Release asset size mismatch for $file." >&2; exit 1; }
-          done
-
-          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          node .github/scripts/publish-release-draft.mjs

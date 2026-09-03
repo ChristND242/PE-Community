@@ -61,7 +61,12 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
     workflow,
     /Supply-chain validation must run from an existing annotated release tag/,
   );
-  assert.match(workflow, /gh release create[^\n]+--draft/);
+  assert.match(workflow, /node \.github\/scripts\/publish-release-draft\.mjs/);
+  assert.match(
+    workflow,
+    /SOURCE_COMMIT: \$\{\{ needs\.validate\.outputs\.source_commit \}\}/,
+  );
+  assert.match(workflow, /RELEASE_ARTIFACT_DIRECTORY: release-artifacts/);
   assert.match(workflow, /\.github\/scripts\/validate-release-ref\.sh/);
   assert.match(
     workflow,
@@ -93,16 +98,6 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
   assert.match(workflow, /releaseTag:\$version/);
   assert.match(workflow, /subject-path: pe-community-update-manifest\.json/);
   assert.match(workflow, /needs: \[validate, image\]/);
-  assert.match(workflow, /Release asset inventory mismatch/);
-  assert.match(workflow, /Release asset digest mismatch/);
-  assert.match(
-    workflow,
-    /pe-community-updater-\$\{VERSION\}-linux-amd64\.tar\.gz/,
-  );
-  assert.match(
-    workflow,
-    /pe-community-updater-\$\{VERSION\}-linux-arm64\.tar\.gz/,
-  );
   assert.match(workflow, /verifyPinnedArchive/);
   assert.match(workflow, /verifyUpstreamArchiveEntries/);
   assert.match(workflow, /verifyBundleEntries/);
@@ -177,7 +172,7 @@ test('release workflow is SHA-pinned, least-privilege, draft-first, and inventor
     packagingStep,
     /verify_bundled_gh "\$architecture" "\$gh_binary"/,
   );
-  assert.match(workflow, /gh release edit[^\n]+--draft=false/);
+  assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)/);
   assert.match(
     workflow,
     /publish-release:\s*\n\s*if: github\.event_name == 'push'/,
