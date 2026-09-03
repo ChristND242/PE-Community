@@ -44,6 +44,14 @@ project_root() {
 architecture() {
   case "$(uname -m)" in x86_64) printf '%s\n' linux-amd64;; aarch64|arm64) printf '%s\n' linux-arm64;; *) fail 'Unsupported host architecture.';; esac
 }
+fail_code() {
+  code=$1 message=$2
+  printf '%s: %s\n' "$code" "$message" >&2
+  exit 1
+}
+is_stable_semver() {
+  printf '%s' "$1" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+}
 set_env() {
   file=$1 key=$2 value=$3 temporary="$file.tmp.$$"
   safe_value "$value" || fail 'Invalid configuration value.'
@@ -64,35 +72,89 @@ remove_env() {
   chown "$(stat -c '%u:%g' "$file")" "$temporary"
   mv "$temporary" "$file"
 }
-release_asset() {
-  tag=$1 asset=$2 destination=$3
+release_json() {
+  endpoint=$1
   command -v curl >/dev/null 2>&1 || fail 'curl is required to install the updater.'
   command -v jq >/dev/null 2>&1 || fail 'jq is required to install the updater.'
-  api="https://api.github.com/repos/$repository/releases/tags/$tag"
-  release=$(curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$api") || fail 'Updater artifact verification failed.'
-  [ "$(printf '%s' "$release" | jq -r '.draft == false and .prerelease == false')" = true ] || fail 'Updater artifact verification failed.'
-  url=$(printf '%s' "$release" | jq -r --arg asset "$asset" '[.assets[] | select(.name == $asset)] | if length == 1 then .[0].browser_download_url else empty end')
-  digest=$(printf '%s' "$release" | jq -r --arg asset "$asset" '[.assets[] | select(.name == $asset)] | if length == 1 then .[0].digest else empty end')
-  [ -n "$url" ] && [ "${digest#sha256:}" != "$digest" ] || fail 'Updater artifact verification failed.'
-  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$url" --output "$destination" || fail 'Updater artifact verification failed.'
+  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "https://api.github.com/repos/$repository/$endpoint"
+}
+release_contract_problem() {
+  release=$1 tag=$2
+  is_stable_semver "$tag" || { printf '%s\n' UPDATER_RELEASE_INELIGIBLE; return 1; }
+  printf '%s' "$release" | jq -e --arg tag "$tag" '
+    .tag_name == $tag and .draft == false and .prerelease == false and
+    (.published_at | type == "string")
+  ' >/dev/null || { printf '%s\n' UPDATER_RELEASE_INELIGIBLE; return 1; }
+  for asset in \
+    pe-community-update-manifest.json \
+    pe-community-update-manifest.attestation.json \
+    "pe-community-updater-$tag-linux-amd64.tar.gz" \
+    "pe-community-updater-$tag-linux-arm64.tar.gz"; do
+    count=$(printf '%s' "$release" | jq -r --arg asset "$asset" '[.assets[]? | select(.name == $asset)] | length')
+    [ "$count" = 1 ] || { printf '%s\n' UPDATER_ASSET_MISSING; return 1; }
+    digest=$(printf '%s' "$release" | jq -r --arg asset "$asset" '[.assets[]? | select(.name == $asset)] | .[0].digest // empty')
+    printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$' || { printf '%s\n' UPDATER_ASSET_DIGEST_MISSING; return 1; }
+  done
+}
+select_eligible_release() {
+  page=1
+  while [ "$page" -le 3 ]; do
+    releases=$(release_json "releases?per_page=100&page=$page") || fail_code UPDATER_RELEASE_NOT_FOUND 'No compatible stable updater release is available.'
+    count=$(printf '%s' "$releases" | jq -r 'if type == "array" then length else 0 end')
+    [ "$count" -gt 0 ] || break
+    tags=$(printf '%s' "$releases" | jq -r '.[]? | .tag_name // empty')
+    for tag in $tags; do
+      is_stable_semver "$tag" || continue
+      release=$(printf '%s' "$releases" | jq -c --arg tag "$tag" '.[] | select(.tag_name == $tag)')
+      if problem=$(release_contract_problem "$release" "$tag"); then
+        printf '%s\n' "$tag"
+        return 0
+      fi
+    done
+    [ "$count" -lt 100 ] && break
+    page=$((page + 1))
+  done
+  fail_code UPDATER_RELEASE_NOT_FOUND 'No compatible stable updater release is available.'
+}
+select_pinned_release() {
+  tag=$1
+  is_stable_semver "$tag" || fail_code UPDATER_RELEASE_INELIGIBLE 'Updater version must be strict stable semver.'
+  release=$(release_json "releases/tags/$tag") || fail_code UPDATER_RELEASE_NOT_FOUND "Updater release $tag was not found."
+  if problem=$(release_contract_problem "$release" "$tag"); then
+    printf '%s\n' "$release"
+    return 0
+  fi
+  case "$problem" in
+    UPDATER_ASSET_MISSING) fail_code "$problem" "Updater package contract is incomplete for $tag.";;
+    UPDATER_ASSET_DIGEST_MISSING) fail_code "$problem" "Updater package digest metadata is missing for $tag.";;
+    *) fail_code UPDATER_RELEASE_INELIGIBLE "Updater release $tag is not an eligible stable updater release.";;
+  esac
+}
+release_asset() {
+  release=$1 tag=$2 asset=$3 destination=$4
+  url=$(printf '%s' "$release" | jq -r --arg asset "$asset" '[.assets[]? | select(.name == $asset)] | .[0].browser_download_url // empty')
+  digest=$(printf '%s' "$release" | jq -r --arg asset "$asset" '[.assets[]? | select(.name == $asset)] | .[0].digest // empty')
+  [ -n "$url" ] || fail_code UPDATER_ASSET_MISSING "Updater package for $arch is missing from $tag."
+  printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$' || fail_code UPDATER_ASSET_DIGEST_MISSING "Updater package digest metadata is missing for $tag."
+  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$url" --output "$destination" || fail_code UPDATER_ASSET_DOWNLOAD_FAILED "Updater package download failed for $tag."
   actual=$(sha256sum "$destination" | awk '{print $1}')
-  [ "sha256:$actual" = "$digest" ] || fail 'Updater artifact verification failed.'
+  [ "sha256:$actual" = "$digest" ] || fail_code UPDATER_ASSET_DIGEST_MISMATCH "Updater package verification failed for $tag."
 }
 install_bundle() {
   project=$1 archive=$2 target_arch=$3
   install_root="$project/.pe/updater"
   stage=$(mktemp -d "${TMPDIR:-/tmp}/pe-community-updater.XXXXXX")
   trap 'rm -rf "$stage"' EXIT HUP INT TERM
-  tar -xzf "$archive" -C "$stage" || fail 'Updater artifact verification failed.'
+  tar -xzf "$archive" -C "$stage" || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
   package="$stage/pe-community-updater"
-  entries=$(tar -tzf "$archive") || fail 'Updater artifact verification failed.'
-  printf '%s\n' "$entries" | grep -Eq '^pe-community-updater/(bin/pe-community-updater|bin/gh|dist/server.js|deploy/install.sh)$' || fail 'Updater artifact verification failed.'
-  printf '%s\n' "$entries" | grep -Eq '(^/|(^|/)\.\.(/|$))' && fail 'Updater artifact verification failed.'
-  [ -f "$package/bin/pe-community-updater" ] && [ -f "$package/bin/gh" ] && [ ! -L "$package/bin/gh" ] && [ -x "$package/bin/gh" ] || fail 'Bundled verifier is invalid.'
+  entries=$(tar -tzf "$archive") || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
+  printf '%s\n' "$entries" | grep -Eq '^pe-community-updater/(bin/pe-community-updater|bin/gh|dist/server.js|deploy/install.sh)$' || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
+  printf '%s\n' "$entries" | grep -Eq '(^/|(^|/)\.\.(/|$))' && fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
+  [ -f "$package/bin/pe-community-updater" ] && [ -f "$package/bin/gh" ] && [ ! -L "$package/bin/gh" ] && [ -x "$package/bin/gh" ] || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
   case "$target_arch" in linux-amd64) expected_machine='Advanced Micro Devices X86-64';; linux-arm64) expected_machine='AArch64';; *) fail 'Unsupported host architecture.';; esac
-  command -v readelf >/dev/null 2>&1 || fail 'Bundled verifier is invalid.'
-  readelf -h "$package/bin/gh" | grep -F "Machine:                           $expected_machine" >/dev/null || fail 'Bundled verifier is invalid.'
-  "$package/bin/gh" version | head -n1 | grep -Eq '^gh version 2\.93\.0 ' || fail 'Bundled verifier is invalid.'
+  command -v readelf >/dev/null 2>&1 || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
+  readelf -h "$package/bin/gh" | grep -F "Machine:                           $expected_machine" >/dev/null || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
+  "$package/bin/gh" version | head -n1 | grep -Eq '^gh version 2\.93\.0 ' || fail_code UPDATER_BUNDLE_INVALID 'Updater package is invalid.'
   mkdir -p "$project/.pe"
   chown root:root "$project/.pe"
   chmod 0755 "$project/.pe"
@@ -117,10 +179,12 @@ install_unit() {
   chmod 0644 "$destination"
 }
 
+if [ "${PE_UPDATER_INSTALLER_LIBRARY:-}" = 1 ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 require_root
 project=$(project_root)
-getent group pe-community-updater >/dev/null 2>&1 || groupadd --system pe-community-updater
-command -v node >/dev/null 2>&1 || fail 'Node.js is required to run the updater.'
 
 if [ "$mode" = uninstall ]; then
   systemctl disable --now pe-community-updater.service >/dev/null 2>&1 || true
@@ -138,10 +202,17 @@ fi
 arch=$(architecture)
 current=$(awk -F= '$1 == "PE_COMMUNITY_VERSION" { gsub(/"/, "", $2); print $2; exit }' "$project/.env")
 [ -n "$current" ] || fail 'PE Community version is missing from .env.'
-case "$version" in '') version=$current;; v[0-9]*.[0-9]*.[0-9]*) ;; *) fail 'Updater version must be strict stable semver.';; esac
+if [ -n "$version" ]; then
+  release=$(select_pinned_release "$version")
+else
+  version=$(select_eligible_release)
+  release=$(release_json "releases/tags/$version") || fail_code UPDATER_RELEASE_NOT_FOUND 'No compatible stable updater release is available.'
+fi
 
 archive=$(mktemp "${TMPDIR:-/tmp}/pe-community-updater.XXXXXX.tar.gz")
-release_asset "$version" "pe-community-updater-$version-$arch.tar.gz" "$archive"
+release_asset "$release" "$version" "pe-community-updater-$version-$arch.tar.gz" "$archive"
+getent group pe-community-updater >/dev/null 2>&1 || groupadd --system pe-community-updater
+command -v node >/dev/null 2>&1 || fail 'Node.js is required to run the updater.'
 root=$(install_bundle "$project" "$archive" "$arch")
 mkdir -p "$root/state" "$root/backups"
 chown root:root "$root/state" "$root/backups"
@@ -179,4 +250,4 @@ systemctl daemon-reload
 systemctl enable --now pe-community-updater.service
 docker compose --env-file "$project/.env" -f "$project/docker-compose.prod.yml" -f "$root/docker-compose.updater.yml" up -d --no-deps api
 printf '%s\n' 'PE Community Updater'
-printf '%s\n' "[ok] Installation found" "[ok] Architecture: $arch" "[ok] Stable release: $version" "[ok] Updater verified" "[ok] Updater installed" "[ok] Service running" "[ok] API connected" "[ok] Current application remains $current" '' 'Updater installation complete.' 'No update was performed.'
+printf '%s\n' "[ok] Application version: $current" "[ok] Updater package: $version" "[ok] Architecture: $arch" "[ok] Updater verified" "[ok] Updater installed" "[ok] Service running" "[ok] API connected" "[ok] Application remains $current" '' 'Updater installation complete.' 'No application update was performed.'
