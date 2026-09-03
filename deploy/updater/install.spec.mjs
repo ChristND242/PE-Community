@@ -20,6 +20,7 @@ const override = await readFile(
   new URL('./docker-compose.updater.yml', import.meta.url),
   'utf8',
 );
+const operatorGuide = await readFile(new URL('./README.md', import.meta.url), 'utf8');
 
 const digest =
   'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -129,6 +130,16 @@ test('installer has bounded stable release selection and does not perform an app
   );
   assert.ok(apiRecreation > firstEnvironmentMutation);
   assert.doesNotMatch(installer, /pull|up -d(?! --no-deps api)/);
+});
+
+test('operator guidance keeps updater package selection separate from the application version', () => {
+  assert.match(
+    operatorGuide,
+    /finds the newest published stable release with the complete portable updater contract/,
+  );
+  assert.match(operatorGuide, /does not update the application or change `PE_COMMUNITY_VERSION`/);
+  assert.match(operatorGuide, /`--version` selects the updater package release only/);
+  assert.doesNotMatch(operatorGuide, /the version in `\.env` by default/);
 });
 
 test('default selection skips historical application releases and chooses the newest complete updater release', async () => {

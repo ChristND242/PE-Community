@@ -4,7 +4,7 @@ The updater is an independent host service. The API receives access only to its 
 
 ## Existing installations before the updater
 
-PE Community v1.2.3 is the updater bootstrap release. An installation running v1.1.1 or another pre-updater version cannot install v1.2.3 automatically: the operator must perform one final manual application upgrade, then install and bootstrap the host updater service described below. Automatic updates become available only after that bootstrap is complete and the System Updates status check succeeds.
+PE Community v1.2.3 includes the API-side updater integration. An installation running v1.1.1 or another pre-updater version needs one final manual application upgrade before it can use the host updater. The first published portable-updater release can then bootstrap the host service while the application remains on v1.2.3. Automatic updates become available after that bootstrap and the System Updates status check succeed.
 
 ## Install once
 
@@ -14,7 +14,7 @@ From the PE Community project directory, run:
 sudo ./deploy/updater/install.sh
 ```
 
-The installer detects the project, selects the host architecture, obtains the matching asset from the requested stable release (the version in `.env` by default), verifies the official release asset digest, installs the package at `<project-root>/.pe/updater`, configures the authenticated API-only socket override, writes the systemd environment, starts the service, and recreates only the API. It does not update the application.
+The installer detects the project, selects the host architecture, finds the newest published stable release with the complete portable updater contract, verifies the matching official release asset digest, installs the package at `<project-root>/.pe/updater`, configures the authenticated API-only socket override, writes the systemd environment, starts the service, and recreates only the API. It does not update the application or change `PE_COMMUNITY_VERSION`.
 
 Use an explicit stable release when needed:
 
@@ -22,7 +22,13 @@ Use an explicit stable release when needed:
 sudo ./deploy/updater/install.sh --project-dir /path/to/pe-community --version vX.Y.Z
 ```
 
+`--version` selects the updater package release only. It does not select or install a new PE Community application version.
+
 The package carries its pinned `gh` verifier at `<updater-root>/bin/gh`. Runtime resolution is relative to the installed package; the updater never uses a host `gh` from `PATH`.
+
+## First portable updater release notes
+
+Portable updater bootstrap is available for Linux amd64 and arm64. Existing installations can install the host updater without changing their current PE Community application version. After bootstrap, an Owner uses **Settings → System Updates** to check and approve later application updates. The API is the only application component that can reach the updater over authenticated Unix IPC; application containers do not receive the Docker socket. Each updater archive includes the bundled GitHub CLI verifier and required operator/support files.
 
 ## Verify the bootstrap
 
